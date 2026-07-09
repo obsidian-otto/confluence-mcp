@@ -22,13 +22,6 @@ func TestArgsRoundTrip(t *testing.T) {
 		JQ           string
 		OutputFormat string
 	}
-	type expectPost struct {
-		Path         string
-		Query        map[string]string
-		Body         map[string]any
-		JQ           string
-		OutputFormat string
-	}
 
 	t.Run("Get", func(t *testing.T) {
 		raw := []byte(`{"path":"/wiki/api/v2/spaces","query":{"limit":"5","cursor":"abc"},"jq":"results[*].id","outputFormat":"json"}`)
