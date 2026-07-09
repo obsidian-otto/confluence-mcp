@@ -279,34 +279,34 @@ for `executeRequest` later.
 
 **Tasks**
 
-- [ ] `go get github.com/ctreminiom/go-atlassian/v2` (pin a version)
-- [ ] Write `internal/atlassian/errors_test.go`: table-driven cases for
+- [x] `go get github.com/ctreminiom/go-atlassian/v2` (pin a version)
+- [x] Write `internal/atlassian/errors_test.go`: table-driven cases for
   `AuthMissingError`, `APIError`, and the error-shape format from
   `specs/09-anti-patterns/03-error-shapes.md`
-- [ ] Run — expect FAIL
-- [ ] Write `internal/atlassian/errors.go` (`AuthMissingError`,
+- [x] Run — expect FAIL
+- [x] Write `internal/atlassian/errors.go` (`AuthMissingError`,
   `APIError`, error message shape: `<METHOD> <path>: <status> <text> - <body>`)
-- [ ] Tests pass
-- [ ] Write `internal/atlassian/auth.go` (`SetBasicAuth` wrapper; token
+- [x] Tests pass
+- [x] Write `internal/atlassian/auth.go` (`SetBasicAuth` wrapper; token
   field is the constructor arg, never logged)
-- [ ] Write `internal/atlassian/client_test.go` (mock `HTTPClient`,
+- [x] Write `internal/atlassian/client_test.go` (mock `HTTPClient`,
   verify headers + URL)
-- [ ] Run — expect FAIL
-- [ ] Write `internal/atlassian/client.go`: `New(cfg)`, `Do(...)`,
+- [x] Run — expect FAIL
+- [x] Write `internal/atlassian/client.go`: `New(cfg)`, `Do(...)`,
   `Call(ctx, method, path, query, body)`
-- [ ] Tests pass
-- [ ] `make check` green
-- [ ] Commit: `feat(atlassian): client wrapper + error shapes (anti-pattern)` 
+- [x] Tests pass
+- [x] `make check` green
+- [x] Commit: `feat(atlassian): client wrapper + error shapes (anti-pattern)` 
 
 **Spec to follow:** `specs/03-go-atlassian/01-package-layout.md` and
 `specs/09-anti-patterns/03-error-shapes.md`.
 
 **Verification**
 
-- [ ] `grep -r "ATLASSIAN_API_TOKEN" internal/atlassian/` returns 0 matches
-- [ ] `grep -r "log.Print" internal/atlassian/` returns 0 matches
-- [ ] Error shape test asserts the literal format string
-- [ ] `make check` exits 0
+- [x] `grep -r "ATLASSIAN_API_TOKEN" internal/atlassian/` returns 0 matches
+- [x] `grep -r "log.Print" internal/atlassian/` returns 0 matches
+- [x] Error shape test asserts the literal format string
+- [x] `make check` exits 0
 
 **Kickoff prompt body** (publish to `phase-2-prompt`):
 
@@ -869,6 +869,7 @@ Append a bullet after each phase:
 - 2026-07-09 — Phase 3: TOON encoder + Marshal + MarshalIndent + decoder (62 subtests) — sha=`3c1a24a`. Dispatched in parallel batch. Matched @toon-format/toon reference byte-for-byte for non-root nested-object cases.
 - 2026-07-09 — Phase 4: jmespath Apply wrapper + 9 tests with short-circuit proof — sha=`7983d48`. Dispatched in parallel batch. Pinned go-jmespath v0.4.0. Phase 4 hit a Hermes `go get` permission dialog (unblocked manually).
 - 2026-07-09 — Phase 5: 5 arg types + verbatim descriptions (14 tests) — sha=`0e1e056`. Dispatched in parallel batch. Vendored `upstream.atlassian.api.tool.ts` for byte-identity check.
+- 2026-07-09 — Phase 2: atlassian.Client wrapper + Auth + APIError (19 tests) — sha=`b6a669a`. go-atlassian v2.12.0 pinned. make check green. Also cleaned pre-existing golangci-lint issues in dotenv.go and tools/args_test.go.
 
 ---
 
