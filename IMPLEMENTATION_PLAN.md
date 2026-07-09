@@ -53,7 +53,7 @@ Master checklist — flip the box when the phase is fully verified.
 - [x] **Phase 4** — `internal/jmespath`: wrapper + tests *(parallel w/ 3)*
 - [x] **Phase 5** — `internal/tools`: args types + 5 `CONF_*_DESCRIPTION` constants
 - [x] **Phase 6** — `internal/tools`: `executeRequest()` shared handler helper
-- [ ] **Phase 7** — `internal/tools`: five handlers + `safeHandler` panic wrap
+- [x] **Phase 7** — `internal/tools`: five handlers + `safeHandler` panic wrap
 - [ ] **Phase 8** — `internal/server` + `RegisterAll()`: bootstrap + registration
 - [ ] **Phase 9** — `cmd/mcp-confluence/main.go`: full lifecycle (load → serve)
 - [ ] **Phase 10** — Wire + smoke: `make check` + end-to-end JSON-RPC smoke
@@ -530,26 +530,26 @@ in a `safeHandler()` that recovers panics and returns
 
 **Tasks**
 
-- [ ] Write `internal/tools/handlers_test.go` (table per method: argument
+- [x] Write `internal/tools/handlers_test.go` (table per method: argument
   shape, panic-recovery, error propagation)
-- [ ] Run — expect FAIL
-- [ ] Write `internal/tools/handlers.go`:
-  - [ ] `HandleGet(args) (string, error)`
-  - [ ] `HandlePost(ar args, rawBody []byte) (string, error)`
-  - [ ] `HandlePut(...)` / `HandlePatch(...)` / `HandleDelete(...)`
-  - [ ] `safeHandler(fn) ToolHandler` — `defer/recover`, log panic to
+- [x] Run — expect FAIL
+- [x] Write `internal/tools/handlers.go`:
+  - [x] `HandleGet(args) (string, error)`
+  - [x] `HandlePost(ar args, rawBody []byte) (string, error)`
+  - [x] `HandlePut(...)` / `HandlePatch(...)` / `HandleDelete(...)`
+  - [x] `safeHandler(fn) ToolHandler` — `defer/recover`, log panic to
     stderr, return MCP error
-- [ ] Tests pass
-- [ ] `make check` green
-- [ ] Commit: `feat(tools): 5 handlers + safeHandler panic recovery`
+- [x] Tests pass
+- [x] `make check` green
+- [x] Commit: `feat(tools): 5 handlers + safeHandler panic recovery`
 
 **Spec to follow:** `specs/06-implementation-skeleton/03-tool-handlers.md`.
 
 **Verification**
 
-- [ ] Panic-recovery test forces a panic in `executeRequest` and asserts
+- [x] Panic-recovery test forces a panic in `executeRequest` and asserts
   the MCP error envelope is returned, not a crash
-- [ ] `make check` exits 0
+- [x] `make check` exits 0
 
 **Kickoff prompt body** (publish to `phase-7-prompt`):
 
