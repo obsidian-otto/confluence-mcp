@@ -52,7 +52,7 @@ Master checklist — flip the box when the phase is fully verified.
 - [x] **Phase 3** — `internal/toon`: encoder + round-trip tests *(parallel w/ 4)*
 - [x] **Phase 4** — `internal/jmespath`: wrapper + tests *(parallel w/ 3)*
 - [x] **Phase 5** — `internal/tools`: args types + 5 `CONF_*_DESCRIPTION` constants
-- [ ] **Phase 6** — `internal/tools`: `executeRequest()` shared handler helper
+- [x] **Phase 6** — `internal/tools`: `executeRequest()` shared handler helper
 - [ ] **Phase 7** — `internal/tools`: five handlers + `safeHandler` panic wrap
 - [ ] **Phase 8** — `internal/server` + `RegisterAll()`: bootstrap + registration
 - [ ] **Phase 9** — `cmd/mcp-confluence/main.go`: full lifecycle (load → serve)
@@ -482,26 +482,26 @@ fetch → truncate → JMESPath → output-format → return. Encapsulate as
 
 **Tasks**
 
-- [ ] Write `internal/tools/execute_test.go` (table-driven covering all
+- [x] Write `internal/tools/execute_test.go` (table-driven covering all
   9 steps + error cases: upstream 401, 404, 409, 500; truncation; empty
   expr; TOON vs JSON outputFormat)
-- [ ] Run — expect FAIL
-- [ ] Write `internal/tools/execute.go` with the 9 steps
-- [ ] Tests pass
-- [ ] Add 40k-char truncation logic + `/tmp/mcp/<session-id>.json`
+- [x] Run — expect FAIL
+- [x] Write `internal/tools/execute.go` with the 9 steps
+- [x] Tests pass
+- [x] Add 40k-char truncation logic + `/tmp/mcp/<session-id>.json`
   pointer (matches upstream)
-- [ ] `make check` green
-- [ ] Commit: `feat(tools): executeRequest helper (9-step shared logic)`
+- [x] `make check` green
+- [x] Commit: `feat(tools): executeRequest helper (9-step shared logic)`
 
 **Spec to follow:** `specs/02-upstream-aashari/03-lessons-and-quirks.md`
 (truncation rules) and `specs/05-tool-surface-design/01-output-formats.md`.
 
 **Verification**
 
-- [ ] Truncation test asserts the `/tmp/mcp/<id>.json` path appears in
+- [x] Truncation test asserts the `/tmp/mcp/<id>.json` path appears in
   the response when the upstream body exceeds 40 000 chars
-- [ ] All 9 steps verified individually (subtests)
-- [ ] `make check` exits 0
+- [x] All 9 steps verified individually (subtests)
+- [x] `make check` exits 0
 
 **Kickoff prompt body** (publish to `phase-6-prompt`):
 
@@ -870,6 +870,7 @@ Append a bullet after each phase:
 - 2026-07-09 — Phase 4: jmespath Apply wrapper + 9 tests with short-circuit proof — sha=`7983d48`. Dispatched in parallel batch. Pinned go-jmespath v0.4.0. Phase 4 hit a Hermes `go get` permission dialog (unblocked manually).
 - 2026-07-09 — Phase 5: 5 arg types + verbatim descriptions (14 tests) — sha=`0e1e056`. Dispatched in parallel batch. Vendored `upstream.atlassian.api.tool.ts` for byte-identity check.
 - 2026-07-09 — Phase 2: atlassian.Client wrapper + Auth + APIError (19 tests) — sha=`b6a669a`. go-atlassian v2.12.0 pinned. make check green. Also cleaned pre-existing golangci-lint issues in dotenv.go and tools/args_test.go.
+- 2026-07-09 — Phase 6: executeRequest (9-step shared handler) — sha=`875c4c5`. 13 tests covering 200/TOON, JQ, JSON-format, 4xx/5xx APIError shape, 40k truncation, empty-JQ short-circuit. Pane ran `--yolo` (no permission prompts).
 
 ---
 
