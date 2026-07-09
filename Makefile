@@ -53,7 +53,7 @@ RESET  := \033[0m
 # .PHONY — every target declared below is phony
 # -----------------------------------------------------------------------
 .PHONY: help install clean build test lint format check type-check security \
-        run dev image image-push image-inspect sbom \
+        run dev image image-push image-inspect docker-build sbom \
         verify-env verify-tools \
         info locate-bin \
         all
@@ -201,7 +201,7 @@ dev: build ## Build and run with DEBUG=true (verbose stderr logging)
 # -----------------------------------------------------------------------
 # Container image (pack + Paketo Go BuildPak)
 # -----------------------------------------------------------------------
-image: verify-tools build ## Build OCI image with $(BUILDER)
+image: verify-tools build ## Build OCI image with $(BUILDER) (pack + Paketo Go BuildPak)
 	@printf "$(BLUE)Building OCI image with $(BUILDER)...$(RESET)\n"
 	$(PACK) build $(IMAGE_NAME):$(IMAGE_TAG) \
 	  --path . \
@@ -219,6 +219,11 @@ image-push: image ## Tag and push image to ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG
 
 image-inspect: ## Show the built OCI image metadata
 	$(PACK) inspect $(IMAGE_NAME):$(IMAGE_TAG)
+
+docker-build: verify-tools ## Build OCI image with plain docker (fallback when pack unavailable)
+	@printf "$(BLUE)Building OCI image with docker (Dockerfile fallback)...$(RESET)\n"
+	$(DOCKER) build -t $(IMAGE_NAME):$(IMAGE_TAG) --build-arg VERSION=$(IMAGE_TAG) .
+	@printf "$(GREEN)✓ Image built: $(IMAGE_NAME):$(IMAGE_TAG)$(RESET)\n"
 
 sbom: image ## Show the SBOM (CycloneDX JSON) for the built image
 	@printf "$(BLUE)SBOM files:$(RESET)\n"

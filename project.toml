@@ -1,0 +1,78 @@
+# project.toml — Paketo Buildpacks project descriptor
+#
+# Read automatically by `pack build` at the module root.
+# Spec: https://github.com/buildpacks/spec/blob/main/extensions/project-descriptor.md
+# Spec source: specs/07-paketo-buildpack/01-project-toml.md
+#
+# Schema: 0.2 — the canonical Cloud Native Buildpacks project descriptor
+# format. Top-level `[_]` carries project metadata (id/name/version/
+# source-url); `[io.buildpacks]` and its `[[build.env]]` arrays hold
+# buildpack-specific config.
+#
+# Builder:  paketobuildpacks/builder-jammy-tiny (distroless run image)
+# Buildpack: paketo-buildpacks/go
+#
+# Build command (wrapped by `make image`):
+#   pack build mcp-confluence:latest --path . \
+#     --builder paketobuildpacks/builder-jammy-tiny \
+#     --buildpack paketo-buildpacks/go \
+#     --sbom-output-dir ./sbom --pull-policy if-not-present
+
+# ----------------------------------------------------------------------------
+# [_]  Project metadata (visible in `pack inspect` / `docker inspect`)
+# ----------------------------------------------------------------------------
+[_]
+schema-version = "0.2"
+id = "io.bennie.mcp-confluence"
+name = "mcp-confluence"
+version = "0.1.0"
+source-url = "https://github.com/bennie/mcp-confluence"
+documentation-url = "https://github.com/bennie/mcp-confluence/blob/main/README.md"
+
+[[_.licenses]]
+type = "MIT"
+uri = "https://opensource.org/licenses/MIT"
+
+[_.metadata]
+title = "mcp-confluence"
+description = "Confluence Cloud MCP server in Go (stdio transport) — exposes conf_get / conf_post / conf_put / conf_patch / conf_delete over JSON-RPC."
+tools = "conf_get,conf_post,conf_put,conf_patch,conf_delete"
+transport = "stdio"
+
+# ----------------------------------------------------------------------------
+# [io.buildpacks]  Buildpack-specific config
+# ----------------------------------------------------------------------------
+
+# Compile only the server binary. Default would be `.` (module root),
+# which tries to compile every package as a command and fails on
+# `internal/...` (those are libraries, not commands).
+[[io.buildpacks.build.env]]
+name = "BP_GO_TARGETS"
+value = "./cmd/mcp-confluence"
+
+# Strip debug info (-s -w) and inject the version via the existing
+# `const version = "v0.1.0"` declared in cmd/mcp-confluence/main.go.
+[[io.buildpacks.build.env]]
+name = "BP_GO_BUILD_LDFLAGS"
+value = "-s -w -X main.version=v0.1.0"
+
+# NOTE: BP_GO_VERSION is intentionally NOT pinned here. The
+# `paketobuildpacks/builder-jammy-tiny` stack only ships
+# 1.25.8 / 1.25.9 / 1.26.1 / 1.26.2; the project's go.mod
+# (go 1.26.4) is honoured as a `>= 1.26` constraint and the
+# buildpack picks the closest available match (1.26.2). Pinning
+# to an older release (e.g. 1.24.4) fails with "no compatible
+# versions" against the jammy-tiny stack's Go inventory.
+
+# MANDATORY for the distroless run image: produces a fully static binary.
+# `paketobuildpacks/run-jammy-tiny` has NO glibc, NO libpthread, NO libdl.
+# A CGO binary would crash at runtime with exec format / missing-library.
+[[io.buildpacks.build.env]]
+name = "CGO_ENABLED"
+value = "0"
+
+# Path (relative to /workspace inside the build container) of the
+# compiled binary that becomes the image entrypoint.
+[[io.buildpacks.build.env]]
+name = "BP_LAUNCH_POINT"
+value = "./cmd/mcp-confluence"
