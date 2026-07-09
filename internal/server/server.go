@@ -41,6 +41,7 @@ import (
 	"fmt"
 
 	mcp "github.com/metoro-io/mcp-golang"
+	"github.com/metoro-io/mcp-golang/transport"
 	"github.com/metoro-io/mcp-golang/transport/stdio"
 
 	"github.com/bennie/mcp-confluence/internal/atlassian"
@@ -120,7 +121,46 @@ type ServerDeps struct {
 // visible to the LLM via Hermes' tool-listing UI. Changing them
 // after release is a breaking change for any client that pins to
 // a specific server identity.
+// New constructs a *mcp.Server with the stdio transport (reading from
+// os.Stdin and writing to os.Stdout) and the 5 Confluence tools
+// registered. It does NOT call Serve(); the caller (Phase 9's
+// main.go) is responsible for that.
+//
+// For tests / custom stdin/stdout wiring, see NewWithTransport — that
+// variant accepts a caller-supplied transport and is what main.go
+// uses so the lifecycle can detect stdin EOF (the stdio transport's
+// readLoop exits silently on EOF without invoking the server's
+// shutdown path, so a separate goroutine that owns the stdin end is
+// needed for clean shutdown).
+//
+// Return values:
+//
+//   - (*mcp.Server, nil) on success.
+//   - (nil, error)       when deps is empty / nil. The error message
+//     names the missing field so a Phase 9 stack trace points at
+//     the right env var or construction site.
+//
+// The server name and version are set via the WithName/WithVersion
+// options. Both surface in the MCP `initialize` response and are
+// visible to the LLM via Hermes' tool-listing UI. Changing them
+// after release is a breaking change for any client that pins to
+// a specific server identity.
 func New(deps ServerDeps) (*mcp.Server, error) {
+	return NewWithTransport(deps, stdio.NewStdioServerTransport())
+}
+
+// NewWithTransport is the explicit-transport constructor. main.go
+// uses it to inject a stdio transport whose input reader is wired
+// to the WRITE end of an io.Pipe that main.go owns — that gives
+// main.go a clean stdin-EOF signal (closing the pipe writer end)
+// without competing with the transport's internal bufio.Reader for
+// bytes on os.Stdin. Tests can pass a transport bound to a
+// bytes.Buffer or a net.Conn without touching os.Stdin.
+//
+// All other behavior is identical to New: the same ServerDeps
+// validation, the same ServerName/ServerVersion, the same
+// RegisterAll delegation.
+func NewWithTransport(deps ServerDeps, tr transport.Transport) (*mcp.Server, error) {
 	// Validate deps. We check each field in turn so the error
 	// message names the FIRST missing field; subsequent checks
 	// run only after earlier ones pass.
@@ -132,7 +172,7 @@ func New(deps ServerDeps) (*mcp.Server, error) {
 	}
 
 	srv := mcp.NewServer(
-		stdio.NewStdioServerTransport(),
+		tr,
 		mcp.WithName(ServerName),
 		mcp.WithVersion(ServerVersion),
 	)

@@ -117,10 +117,10 @@ install: verify-tools ## Install Go module dependencies
 # -----------------------------------------------------------------------
 # Build
 # -----------------------------------------------------------------------
-build: ## Build the binary to ./bin/$(BINARY_NAME)
+build: ## Build the binary to ./bin/$(BINARY_NAME) (statically linked for distroless)
 	@printf "$(BLUE)Building $(BINARY_NAME)...$(RESET)\n"
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build -ldflags "-s -w" -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
+	CGO_ENABLED=0 $(GO) build -ldflags "-s -w" -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
 	@printf "$(GREEN)✓ Built $(BUILD_DIR)/$(BINARY_NAME)$(RESET)\n"
 
 # -----------------------------------------------------------------------
