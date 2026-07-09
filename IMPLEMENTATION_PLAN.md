@@ -48,7 +48,7 @@ Master checklist — flip the box when the phase is fully verified.
 
 - [x] **Phase 0** — Bootstrap (Go module skeleton, no-op `main.go`)
 - [x] **Phase 1** — `internal/config`: stdlib dotenv + `LoadFromEnv`
-- [ ] **Phase 2** — `internal/atlassian`: client wrapper, basic auth, errors
+- [x] **Phase 2** — `internal/atlassian`: client wrapper, basic auth, errors
 - [x] **Phase 3** — `internal/toon`: encoder + round-trip tests *(parallel w/ 4)*
 - [x] **Phase 4** — `internal/jmespath`: wrapper + tests *(parallel w/ 3)*
 - [x] **Phase 5** — `internal/tools`: args types + 5 `CONF_*_DESCRIPTION` constants
@@ -577,25 +577,25 @@ and a `*config.Config`.
 
 **Tasks**
 
-- [ ] `go get github.com/metoro-io/mcp-golang`
-- [ ] Write `internal/server/server_test.go` (server constructed, 5
+- [x] `go get github.com/metoro-io/mcp-golang`
+- [x] Write `internal/server/server_test.go` (server constructed, 5
   tools registered — names match `conf_get`/`conf_post`/`conf_put`/
   `conf_patch`/`conf_delete`)
-- [ ] Run — expect FAIL
-- [ ] Write `internal/server/server.go`: `NewServer(cfg, client) (*mcp.Server, error)`
-- [ ] Write `internal/tools/register.go`: `RegisterAll(server, cfg, client) error`
-- [ ] Tests pass
-- [ ] `make check` green
-- [ ] Commit: `feat(server): RegisterAll + NewServer bootstrap`
+- [x] Run — expect FAIL
+- [x] Write `internal/server/server.go`: `NewServer(cfg, client) (*mcp.Server, error)`
+- [x] Write `internal/tools/register.go`: `RegisterAll(server, cfg, client) error`
+- [x] Tests pass
+- [x] `make check` green
+- [x] Commit: `feat(server): RegisterAll + NewServer bootstrap`
 
 **Spec to follow:** `specs/04-mcp-golang-framework/01-server-api.md` and
 `specs/06-implementation-skeleton/03-tool-handlers.md`.
 
 **Verification**
 
-- [ ] Tool names returned by introspection match the upstream 5 names
+- [x] Tool names returned by introspection match the upstream 5 names
   exactly
-- [ ] `make check` exits 0
+- [x] `make check` exits 0
 
 **Kickoff prompt body** (publish to `phase-8-prompt`):
 
@@ -623,19 +623,19 @@ Commit. Report sha on phase-8-done.
 
 **Tasks**
 
-- [ ] Write `cmd/mcp-confluence/main_test.go` (table-driven: missing var
+- [x] Write `cmd/mcp-confluence/main_test.go` (table-driven: missing var
   X → expect specific error message; valid env → expect `run()` to
   attempt to serve)
-- [ ] Run — expect FAIL
-- [ ] Replace `cmd/mcp-confluence/main.go` with the full lifecycle from
+- [x] Run — expect FAIL
+- [x] Replace `cmd/mcp-confluence/main.go` with the full lifecycle from
   the spec
-- [ ] `make build` — expect green
-- [ ] `make test` — expect green
-- [ ] Manual smoke: `./bin/mcp-confluence` with no env → expect FATAL
+- [x] `make build` — expect green
+- [x] `make test` — expect green
+- [x] Manual smoke: `./bin/mcp-confluence` with no env → expect FATAL
   on stderr, exit 1
-- [ ] Manual smoke: `./bin/mcp-confluence` with valid env + a stdin EOF
+- [x] Manual smoke: `./bin/mcp-confluence` with valid env + a stdin EOF
   → expect clean exit
-- [ ] Commit: `feat(cmd): full lifecycle in main.go`
+- [x] Commit: `feat(cmd): full lifecycle in main.go`
 
 **Spec to follow:** `specs/06-implementation-skeleton/02-main-entrypoint.md`
 (the full `main.go` skeleton is the implementation). Key behaviors:
@@ -644,12 +644,12 @@ handling, `run()` separation for testability.
 
 **Verification**
 
-- [ ] `go test ./cmd/mcp-confluence/...` all pass
-- [ ] `./bin/mcp-confluence` with no env exits 1 with FATAL on stderr
-- [ ] `./bin/mcp-confluence` with valid env does NOT exit 0 immediately
+- [x] `go test ./cmd/mcp-confluence/...` all pass
+- [x] `./bin/mcp-confluence` with no env exits 1 with FATAL on stderr
+- [x] `./bin/mcp-confluence` with valid env does NOT exit 0 immediately
   (it's blocking on stdin — kill with Ctrl-C to confirm clean exit)
-- [ ] `ldd ./bin/mcp-confluence` shows it is statically linked (no libc)
-- [ ] `grep -r "fmt.Println" cmd/` returns 0 matches
+- [x] `ldd ./bin/mcp-confluence` shows it is statically linked (no libc)
+- [x] `grep -r "fmt.Println" cmd/` returns 0 matches
 
 **Kickoff prompt body** (publish to `phase-9-prompt`):
 
@@ -679,25 +679,25 @@ end-to-end smoke test against the real Confluence API using a real
 
 **Tasks**
 
-- [ ] `make format` (ensure gofmt-clean)
-- [ ] `make lint` (vet + gofmt -l; golangci-lint if installed)
-- [ ] `make test` (all unit tests)
-- [ ] `make check` (lint + test combined)
-- [ ] Manual: `export ATLASSIAN_SITE_NAME=...` (real site), `export
+- [x] `make format` (ensure gofmt-clean)
+- [x] `make lint` (vet + gofmt -l; golangci-lint if installed)
+- [x] `make test` (all unit tests)
+- [x] `make check` (lint + test combined)
+- [x] Manual: `export ATLASSIAN_SITE_NAME=...` (real site), `export
   ATLASSIAN_USER_EMAIL=...`, `export ATLASSIAN_API_TOKEN=...`. Then feed
   the binary a JSON-RPC `tools/list` request on stdin and confirm it
   responds with the 5 tool names
-- [ ] Manual: feed a `tools/call` for `conf_get` with
+- [x] Manual: feed a `tools/call` for `conf_get` with
   `path: "/wiki/api/v2/spaces?limit=2"` and confirm the response is
   TOON-encoded
-- [ ] Commit (if any fixes were needed): `chore: smoke-test fixes`
+- [x] Commit (if any fixes were needed): `chore: smoke-test fixes`
 
 **Verification**
 
-- [ ] `make check` exits 0
-- [ ] `make test` shows all tests pass
-- [ ] End-to-end JSON-RPC smoke test returns valid responses
-- [ ] No stdout pollution: capture stdout during the smoke test and
+- [x] `make check` exits 0
+- [x] `make test` shows all tests pass
+- [x] End-to-end JSON-RPC smoke test returns valid responses
+- [x] No stdout pollution: capture stdout during the smoke test and
   confirm it's 100% valid JSON-RPC
 
 **Kickoff prompt body** (publish to `phase-10-prompt`):
@@ -727,24 +727,24 @@ that `make image` produces a working OCI image.
 
 **Tasks**
 
-- [ ] Create `project.toml` (Paketo build descriptor)
-- [ ] (Optionally) Create `Dockerfile` fallback
-- [ ] `make image` — expect a `confluence-mcp` OCI image in the local
+- [x] Create `project.toml` (Paketo build descriptor)
+- [x] (Optionally) Create `Dockerfile` fallback
+- [x] `make image` — expect a `confluence-mcp` OCI image in the local
   `docker images` output
-- [ ] `make image-inspect` — confirm the static binary entrypoint
-- [ ] Run the image with `docker run --rm -i -e ATLASSIAN_*=... <image>`
+- [x] `make image-inspect` — confirm the static binary entrypoint
+- [x] Run the image with `docker run --rm -i -e ATLASSIAN_*=... <image>`
   piped to a JSON-RPC `tools/list` request, confirm 5 tools return
-- [ ] Commit: `feat(image): Paketo project.toml + make image pipeline`
+- [x] Commit: `feat(image): Paketo project.toml + make image pipeline`
 
 **Spec to follow:** `specs/07-paketo-buildpack/01-project-toml.md` (the
 exact `project.toml` shape for `paketobuildpacks/go`).
 
 **Verification**
 
-- [ ] `make image` exits 0
-- [ ] `docker images | grep confluence-mcp` shows the new image
-- [ ] `docker run` smoke test returns 5 tools
-- [ ] `make sbom` produces a valid CycloneDX JSON
+- [x] `make image` exits 0
+- [x] `docker images | grep confluence-mcp` shows the new image
+- [x] `docker run` smoke test returns 5 tools
+- [x] `make sbom` produces a valid CycloneDX JSON
 
 **Kickoff prompt body** (publish to `phase-11-prompt`):
 
@@ -823,21 +823,21 @@ phase-12-done including whether you committed ~/.hermes/config.yaml.
 
 Across all phases, the following invariants must hold:
 
-- [ ] **No stdout writes.** `grep -r "fmt.Println" cmd/ internal/` returns
+- [x] **No stdout writes.** `grep -r "fmt.Println" cmd/ internal/` returns
   0 matches (except in tests, which use `t.Log*`)
-- [ ] **No token logging.** `grep -r "ATLASSIAN_API_TOKEN" cmd/ internal/`
+- [x] **No token logging.** `grep -r "ATLASSIAN_API_TOKEN" cmd/ internal/`
   shows the var name only in the config package; the token value never
   appears in source
-- [ ] **Stdlib for `.env` parsing.** No `godotenv` dependency
-- [ ] **TOON is the default output format.** All non-`outputFormat=json`
+- [x] **Stdlib for `.env` parsing.** No `godotenv` dependency
+- [x] **TOON is the default output format.** All non-`outputFormat=json`
   responses are TOON
-- [ ] **JMESPath short-circuits on empty expression.** No parse cost when
+- [x] **JMESPath short-circuits on empty expression.** No parse cost when
   the user doesn't pass `jq`
-- [ ] **The 40k truncation notice and `/tmp/mcp/<session-id>.json` path
+- [x] **The 40k truncation notice and `/tmp/mcp/<session-id>.json` path
   are byte-identical to the upstream**
-- [ ] **The 5 description constants are byte-identical to the upstream's
+- [x] **The 5 description constants are byte-identical to the upstream's
   `src/tools/atlassian.api.tool.ts` lines 127–223**
-- [ ] **`make build` and `make test` exit 0 after every phase**
+- [x] **`make build` and `make test` exit 0 after every phase**
 
 A final sweep after Phase 12 verifies each box above.
 
@@ -871,6 +871,13 @@ Append a bullet after each phase:
 - 2026-07-09 — Phase 5: 5 arg types + verbatim descriptions (14 tests) — sha=`0e1e056`. Dispatched in parallel batch. Vendored `upstream.atlassian.api.tool.ts` for byte-identity check.
 - 2026-07-09 — Phase 2: atlassian.Client wrapper + Auth + APIError (19 tests) — sha=`b6a669a`. go-atlassian v2.12.0 pinned. make check green. Also cleaned pre-existing golangci-lint issues in dotenv.go and tools/args_test.go.
 - 2026-07-09 — Phase 6: executeRequest (9-step shared handler) — sha=`875c4c5`. 13 tests covering 200/TOON, JQ, JSON-format, 4xx/5xx APIError shape, 40k truncation, empty-JQ short-circuit. Pane ran `--yolo` (no permission prompts).
+- 2026-07-09 — Phase 7: 5 handlers (HandleGet/Post/Put/Patch/Delete) + safeHandler — sha=`97542e2`. 13 tests pass, panic-recovery verified, make check green.
+- 2026-07-09 — Phase 8: server.NewServer + tools.RegisterAll (5 tools) — sha=`86e0500`. metoro-io/mcp-golang pinned, 5 names registered verbatim.
+- 2026-07-09 — Phase 9: main.go full lifecycle (load → build → serve → signals) — sha=`69cf7a5`. Stdin-EOF cancels ctx for clean exit. CGO_ENABLED=0 → static binary. 4+ tests.
+- 2026-07-09 — Phase 10: wire + smoke (real Confluence API) — sha=`b85ea84`. Found and fixed 2 real bugs (atlassian.New URL construction, buildURL query encoding). 7/7 packages green. End-to-end tools/list + tools/call conf_get verified against smartergroup.atlassian.net.
+- 2026-07-09 — Phase 11: container image (Paketo Go BuildPak) — sha=`c14cc90`. Image digest `fd1193f018ee`, distroless jammy-tiny. 6 CycloneDX SBOM files, 19 Go components. `docker run` smoke confirmed.
+- 2026-07-09 — Phase 12: Hermes integration (final) — sha=`0c57d20`. 5/5 tools registered, real Confluence data in TOON format. ~/.hermes/config.yaml uses ${VAR} expansion (no literal token). Config NOT committed (user's own config repo). Backup at ~/.hermes/backups/config.20260709_184533.yaml.
+- 2026-07-09 — Plan complete: 174 boxes checked, 0 unchecked. All 12 implementation phases + Phase 0 bootstrap landed.
 - 2026-07-09 — Phase 7: 5 handlers + safeHandler + RegisterAll + NewServer — sha=`97542e2`. three commits (97542e2/86e0500/69cf7a5): handlers → RegisterAll → main.go lifecycle. New transport-trampoline pattern (NewWithTransport + pipe-backed stdio) lets main.go detect stdin EOF for clean shutdown. 9 internal/tools tests pass.
 - 2026-07-09 — Phase 10: smoke-test fixes — sha=`b85ea84`. make format/lint/test/check all green; end-to-end JSON-RPC smoke against real Confluence API returns TOON-encoded `/wiki/api/v2/spaces?limit=2` with real space data (smartergroup.atlassian.net). Two bugs found and fixed: (1) atlassian.New was building `https://<site>` instead of `https://<site>.atlassian.net` (violated Q22-locked settings contract); (2) buildURL was URL-encoding `?` inside the path. New tests: TestBuildURL_PathContainsQuery + TestBuildURL_PathAndQueryMerged.
 - 2026-07-09 — Phase 11: Paketo project.toml + make image pipeline — sha=`c14cc90`. Confluence MCP server is now packaged as a distroless OCI image via `pack build` + Paketo Go BuildPak. `make image` green; `make image-inspect` shows base layers (tiny + Go BuildPak + Paketo run + app).
@@ -882,10 +889,10 @@ Append a bullet after each phase:
 
 The plan is complete when:
 
-- [ ] All 12 implementation phases are checked off in **§ Progress index**
-- [ ] `make check` exits 0
-- [ ] `make image` produces a working OCI image
-- [ ] `hermes mcp test confluence` lists 5 tools
-- [ ] An end-to-end `conf_get` call returns real Confluence data in TOON format
-- [ ] The README at the project root links to this plan and to `specs/`
-- [ ] Every **§ Cross-phase guarantees** checkbox is flipped
+- [x] All 12 implementation phases are checked off in **§ Progress index**
+- [x] `make check` exits 0
+- [x] `make image` produces a working OCI image
+- [x] `hermes mcp test confluence` lists 5 tools
+- [x] An end-to-end `conf_get` call returns real Confluence data in TOON format
+- [x] The README at the project root links to this plan and to `specs/`
+- [x] Every **§ Cross-phase guarantees** checkbox is flipped
