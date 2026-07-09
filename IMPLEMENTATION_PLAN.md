@@ -46,7 +46,7 @@ see **§ Parallel-safe groupings**.
 
 Master checklist — flip the box when the phase is fully verified.
 
-- [ ] **Phase 0** — Bootstrap (Go module skeleton, no-op `main.go`)
+- [x] **Phase 0** — Bootstrap (Go module skeleton, no-op `main.go`)
 - [ ] **Phase 1** — `internal/config`: stdlib dotenv + `LoadFromEnv`
 - [ ] **Phase 2** — `internal/atlassian`: client wrapper, basic auth, errors
 - [ ] **Phase 3** — `internal/toon`: encoder + round-trip tests *(parallel w/ 4)*
@@ -166,11 +166,11 @@ no-op `main.go` that compiles.
 
 **Tasks**
 
-- [ ] `cd /home/bennie/Desktop/hermes/confluence-mcp`
-- [ ] `go mod init github.com/bennie/mcp-confluence`
-- [ ] Write minimal `cmd/mcp-confluence/main.go` that prints `mcp-confluence v0.1.0`
+- [x] `cd /home/bennie/Desktop/hermes/confluence-mcp`
+- [x] `go mod init github.com/bennie/mcp-confluence`
+- [x] Write minimal `cmd/mcp-confluence/main.go` that prints `mcp-confluence v0.1.0`
   to stderr and exits 0
-- [ ] Create directory tree with `.gitkeep` files
+- [x] Create directory tree with `.gitkeep` files
   - [ ] `cmd/mcp-confluence/.gitkeep`
   - [ ] `internal/config/.gitkeep`
   - [ ] `internal/atlassian/.gitkeep`
@@ -178,21 +178,21 @@ no-op `main.go` that compiles.
   - [ ] `internal/toon/.gitkeep`
   - [ ] `internal/tools/.gitkeep`
   - [ ] `internal/server/.gitkeep`
-- [ ] Modify `.gitignore`: add `/bin/`, `/sbom/` (`.env` already covered)
-- [ ] Create `README.md` (1-paragraph purpose + `make help` + link to `specs/`)
-- [ ] `make build` — expect `./bin/mcp-confluence` produced
-- [ ] `./bin/mcp-confluence` — expect version line on stderr, exit 0
-- [ ] Commit: `chore: bootstrap go module + main entrypoint stub`
+- [x] Modify `.gitignore`: add `/bin/`, `/sbom/` (`.env` already covered)
+- [x] Create `README.md` (1-paragraph purpose + `make help` + link to `specs/`)
+- [x] `make build` — expect `./bin/mcp-confluence` produced
+- [x] `./bin/mcp-confluence` — expect version line on stderr, exit 0
+- [x] Commit: `chore: bootstrap go module + main entrypoint stub`
 
 **Spec to follow:** `specs/06-implementation-skeleton/01-file-layout.md` and
 `specs/06-implementation-skeleton/02-main-entrypoint.md`.
 
 **Verification**
 
-- [ ] `make build` exits 0
-- [ ] `./bin/mcp-confluence` exits 0 with version on stderr
-- [ ] `go.mod` exists and lists Go 1.23+
-- [ ] `git log --oneline` shows the commit
+- [x] `make build` exits 0
+- [x] `./bin/mcp-confluence` exits 0 with version on stderr
+- [x] `go.mod` exists and lists Go 1.23+
+- [x] `git log --oneline` shows the commit
 
 **Kickoff prompt body** (publish to `phase-0-prompt`):
 
@@ -863,7 +863,8 @@ A final sweep after Phase 12 verifies each box above.
 
 Append a bullet after each phase:
 
-- YYYY-MM-DD — Phase 0: bootstrap Go module + main stub — sha=`<short>`
+- 2026-07-09 — Phase 0: bootstrap Go module + main stub — sha=`8f9b1b7`
+- 2026-07-09 — Phase 0 note: agent ran in `hermes --cli` tmux pane `phase-0`, delivered via `tbus tui-attach --channel phase-0-prompt`, completion published to `phase-0-done`. `make check` green. Repo was initialized as new (no prior `.git/`).
 
 ---
 
