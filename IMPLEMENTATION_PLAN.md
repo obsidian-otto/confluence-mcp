@@ -58,7 +58,7 @@ Master checklist — flip the box when the phase is fully verified.
 - [x] **Phase 9** — `cmd/mcp-confluence/main.go`: full lifecycle (load → serve)
 - [x] **Phase 10** — Wire + smoke: `make check` + end-to-end JSON-RPC smoke
 - [x] **Phase 11** — Container image: `project.toml` + `make image` green
-- [ ] **Phase 12** — Hermes integration: `~/.hermes/config.yaml` + `mcp test`
+- [x] **Phase 12** — Hermes integration: `~/.hermes/config.yaml` + `mcp test`
 
 ---
 
@@ -773,19 +773,19 @@ phase-11-done.
 
 **Tasks**
 
-- [ ] Read `~/.hermes/.env` to confirm the three `ATLASSIAN_*` vars
+- [x] Read `~/.hermes/.env` to confirm the three `ATLASSIAN_*` vars
   exist (if not, publish to `blockers` and ask the user)
-- [ ] Back up `~/.hermes/config.yaml` (timestamped copy in
+- [x] Back up `~/.hermes/config.yaml` (timestamped copy in
   `~/.hermes/backups/`)
-- [ ] Add the `mcp_servers.confluence:` block to `~/.hermes/config.yaml`
+- [x] Add the `mcp_servers.confluence:` block to `~/.hermes/config.yaml`
   with `${ATLASSIAN_SITE_NAME}`, `${ATLASSIAN_USER_EMAIL}`,
   `${ATLASSIAN_API_TOKEN}` expansion (NOT literal values)
-- [ ] Restart Hermes if running (`hermes mcp test confluence` will spawn
+- [x] Restart Hermes if running (`hermes mcp test confluence` will spawn
   the server)
-- [ ] `hermes mcp test confluence` — confirm 5 tools are listed
-- [ ] `hermes mcp test confluence conf_get --path /wiki/api/v2/spaces?limit=2`
+- [x] `hermes mcp test confluence` — confirm 5 tools are listed
+- [x] `hermes mcp test confluence conf_get --path /wiki/api/v2/spaces?limit=2`
   — confirm a TOON response with real data
-- [ ] Record the result. Config file commit is the user's call (commit
+- [x] Record the result. Config file commit is the user's call (commit
   `~/.hermes/config.yaml` to the user-config repo if appropriate)
 
 **Spec to follow:** `specs/08-deployment-hermes/01-config-yaml.md` (the
@@ -794,11 +794,11 @@ exact `mcp_servers:` block shape) and the `native-mcp` skill
 
 **Verification**
 
-- [ ] `hermes mcp list` shows `confluence` as a registered server
-- [ ] `hermes mcp test confluence` lists 5 tools
-- [ ] An actual tool call returns real Confluence data
-- [ ] `~/.hermes/config.yaml` contains NO literal token — only `${VAR}`
-- [ ] `~/.hermes/config.yaml` backup is preserved
+- [x] `hermes mcp list` shows `confluence` as a registered server
+- [x] `hermes mcp test confluence` lists 5 tools
+- [x] An actual tool call returns real Confluence data
+- [x] `~/.hermes/config.yaml` contains NO literal token — only `${VAR}`
+- [x] `~/.hermes/config.yaml` backup is preserved
 
 **Kickoff prompt body** (publish to `phase-12-prompt`):
 
@@ -873,6 +873,8 @@ Append a bullet after each phase:
 - 2026-07-09 — Phase 6: executeRequest (9-step shared handler) — sha=`875c4c5`. 13 tests covering 200/TOON, JQ, JSON-format, 4xx/5xx APIError shape, 40k truncation, empty-JQ short-circuit. Pane ran `--yolo` (no permission prompts).
 - 2026-07-09 — Phase 7: 5 handlers + safeHandler + RegisterAll + NewServer — sha=`97542e2`. three commits (97542e2/86e0500/69cf7a5): handlers → RegisterAll → main.go lifecycle. New transport-trampoline pattern (NewWithTransport + pipe-backed stdio) lets main.go detect stdin EOF for clean shutdown. 9 internal/tools tests pass.
 - 2026-07-09 — Phase 10: smoke-test fixes — sha=`b85ea84`. make format/lint/test/check all green; end-to-end JSON-RPC smoke against real Confluence API returns TOON-encoded `/wiki/api/v2/spaces?limit=2` with real space data (smartergroup.atlassian.net). Two bugs found and fixed: (1) atlassian.New was building `https://<site>` instead of `https://<site>.atlassian.net` (violated Q22-locked settings contract); (2) buildURL was URL-encoding `?` inside the path. New tests: TestBuildURL_PathContainsQuery + TestBuildURL_PathAndQueryMerged.
+- 2026-07-09 — Phase 11: Paketo project.toml + make image pipeline — sha=`c14cc90`. Confluence MCP server is now packaged as a distroless OCI image via `pack build` + Paketo Go BuildPak. `make image` green; `make image-inspect` shows base layers (tiny + Go BuildPak + Paketo run + app).
+- 2026-07-09 — Phase 12: Hermes integration — sha=N/A (no commit, user maintains their own config repo). 5/5 tools register (`conf_get/post/put/patch/delete`); `conf_get /wiki/api/v2/spaces?limit=2` returns TOON-encoded real data ("Grant Bingham" personal space, status=current, type=personal). Three `${ATLASSIAN_*}` env vars in `~/.hermes/config.yaml` (zero literal credentials — `grep ATATT` returns 0 hits). Backup at `~/.hermes/backups/config.20260709_184533.yaml`. Hit a hidden argparse bug: `hermes mcp add --env A --env B --env C` with `nargs="*"` keeps ONLY the last `--env` value — must pass all values as space-separated args to a single `--env` flag. Resolved by reissuing with `--env A B C` in one flag.
 
 ---
 
