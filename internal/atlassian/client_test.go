@@ -78,11 +78,14 @@ func (r *requestRecorder) setResponse(status int, body string) {
 // newValidConfig returns a config.Config with all required fields set.
 // The email is intentionally a non-secret test value; the APIKey is a
 // short synthetic string. NEVER use a real Atlassian API token in tests.
+//
+// Per the locked contract (specs/01-foundations/03-env-var-contract.md),
+// SiteName is the BARE prefix — the server appends ".atlassian.net" itself.
 func newValidConfig() *config.Config {
 	return &config.Config{
-		SiteName:  "test.atlassian.net",
+		SiteName:  "test",
 		UserEmail: "tester@example.com",
-		APIKey:    "redacted-test-key",
+		APIKey:    "redac...ey",
 		Debug:     false,
 	}
 }
@@ -416,3 +419,50 @@ func TestCall_APIErrorPassthrough(t *testing.T) {
 func errAs(err error, target any) bool {
 	return errors.As(err, target)
 }
+
+// TestBuildURL_PathContainsQuery verifies that a path with a trailing
+// "?key=value" is correctly split — query params land in the URL's
+// RawQuery rather than getting URL-encoded into the path. This is the
+// Phase 10 smoke-test fix (a tool call from a client passes
+// path="/wiki/api/v2/spaces?limit=2" must produce a working URL).
+func TestBuildURL_PathContainsQuery(t *testing.T) {
+	got, err := buildURL("https://test.atlassian.net", "/wiki/api/v2/spaces?limit=2", nil)
+	if err != nil {
+		t.Fatalf("buildURL err: %v", err)
+	}
+	want := "https://test.atlassian.net/wiki/api/v2/spaces?limit=2"
+	if got != want {
+		t.Errorf("buildURL = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "%3F") {
+		t.Errorf("buildURL leaked %%3F encoding (path was not split): %q", got)
+	}
+}
+
+// TestBuildURL_PathAndQueryMerged verifies that path-embedded query and
+// the explicit query map merge correctly — caller-provided entries win
+// on key collision.
+func TestBuildURL_PathAndQueryMerged(t *testing.T) {
+	got, err := buildURL("https://test.atlassian.net",
+		"/wiki/api/v2/spaces?limit=2", map[string]string{"cursor": "abc"})
+	if err != nil {
+		t.Fatalf("buildURL err: %v", err)
+	}
+	u, perr := neturlParse(got)
+	if perr != nil {
+		t.Fatalf("parse %q: %v", got, perr)
+	}
+	if u.Query().Get("limit") != "2" {
+		t.Errorf("limit = %q, want %q", u.Query().Get("limit"), "2")
+	}
+	if u.Query().Get("cursor") != "abc" {
+		t.Errorf("cursor = %q, want %q", u.Query().Get("cursor"), "abc")
+	}
+	if u.Path != "/wiki/api/v2/spaces" {
+		t.Errorf("path = %q, want no query in path", u.Path)
+	}
+}
+
+// neturlParse is a tiny shim so the test file doesn't have to import
+// "net/url" alongside the production package's "net/url" alias.
+func neturlParse(s string) (*url.URL, error) { return url.Parse(s) }

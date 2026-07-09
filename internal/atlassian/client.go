@@ -81,18 +81,24 @@ func New(cfg *config.Config) (*Client, error) {
 		return nil, &AuthMissingError{Field: "ATLASSIAN_API_TOKEN"}
 	}
 
-	// Build the base URL. We assume the conventional Cloud shape; the
-	// go-atlassian library does the same internally.
-	baseURL := "https://" + cfg.SiteName
+	// Build the base URL. The locked settings contract (specs/01-foundations/
+	// 03-env-var-contract.md) defines ATLASSIAN_SITE_NAME as the *bare site
+	// prefix* — e.g. "acme" — and the server builds the URL as
+	// "https://acme.atlassian.net". The upstream aashari MCP tool documents
+	// the same convention. (The ATLASSIAN_API_BASE_URL opt-out for Data
+	// Center is gap Q4 — not implemented in v1.)
+	baseURL := "https://" + cfg.SiteName + ".atlassian.net"
 
 	auth := &Auth{Email: cfg.UserEmail, APIToken: cfg.APIKey}
 
-	// Construct the underlying ctreminiom client. Passing nil for the
-	// httpClient lets the library default to http.DefaultClient; we
-	// then override it in Do() to our own HTTPClient field. The
-	// constructor also wires up the basic-auth state so library calls
-	// (e.g. future typed-service usage) work without re-applying auth.
-	native, err := confluence.New(nil, cfg.SiteName)
+	// Construct the underlying ctreminiom client. The library expects the
+	// full hostname, NOT the bare site prefix — pass the resolved hostname
+	// (e.g. "acme.atlassian.net"). Passing nil for the httpClient lets the
+	// library default to http.DefaultClient; we then override it in Do()
+	// to our own HTTPClient field. The constructor also wires up the
+	// basic-auth state so library calls (e.g. future typed-service usage)
+	// work without re-applying auth.
+	native, err := confluence.New(nil, baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("atlassian: build client: %w", err)
 	}
@@ -223,19 +229,53 @@ func (c *Client) Call(ctx context.Context, method, path string, query map[string
 }
 
 // buildURL composes the full URL from base + path + query. The path must
-// start with "/" (validated by the caller). The query map's empty-valued
-// entries are dropped.
+// start with "/" (validated by the caller).
+//
+// The path may contain a trailing query string (e.g.
+// "/wiki/api/v2/spaces?limit=2") — matching the upstream aashari's
+// `fetchAtlassian(creds, "${path}${queryString}", ...)` shape documented
+// in specs/02-upstream-aashari/01-architecture.md. Any query parameters
+// embedded in the path are merged into the query map (caller-provided
+// entries take precedence on key collision), then the resulting
+// url.Values is encoded as the URL's RawQuery.
+//
+// The query map's empty-valued entries are dropped.
 func buildURL(base, path string, query map[string]string) (string, error) {
 	if !strings.HasPrefix(path, "/") {
 		return "", fmt.Errorf("path must start with \"/\"; got %q", path)
 	}
+	// Split a trailing "?..." off the path and merge it into query so
+	// callers can pass either:
+	//   path: "/wiki/api/v2/spaces"      query: {"limit":"2"}
+	// or:
+	//   path: "/wiki/api/v2/spaces?limit=2"  query: nil
+	// — both produce the same final URL. This matches the upstream
+	// service's flexible input handling.
+	cleanPath := path
+	if i := strings.Index(path, "?"); i >= 0 {
+		cleanPath = path[:i]
+		raw := path[i+1:]
+		if raw != "" {
+			if embedded, err := url.ParseQuery(raw); err == nil {
+				for k, vs := range embedded {
+					if _, present := query[k]; !present && len(vs) > 0 {
+						if query == nil {
+							query = map[string]string{}
+						}
+						query[k] = vs[0]
+					}
+				}
+			}
+		}
+	}
+
 	u, err := url.Parse(base)
 	if err != nil {
 		return "", err
 	}
 	// url.URL.JoinReference would be more elegant, but our paths are
 	// always site-relative and we want a literal join.
-	u.Path = strings.TrimRight(u.Path, "/") + path
+	u.Path = strings.TrimRight(u.Path, "/") + cleanPath
 	if len(query) > 0 {
 		q := u.Query()
 		for k, v := range query {
