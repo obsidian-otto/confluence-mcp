@@ -57,7 +57,7 @@ Master checklist — flip the box when the phase is fully verified.
 - [x] **Phase 8** — `internal/server` + `RegisterAll()`: bootstrap + registration
 - [x] **Phase 9** — `cmd/mcp-confluence/main.go`: full lifecycle (load → serve)
 - [x] **Phase 10** — Wire + smoke: `make check` + end-to-end JSON-RPC smoke
-- [ ] **Phase 11** — Container image: `project.toml` + `make image` green
+- [x] **Phase 11** — Container image: `project.toml` + `make image` green
 - [ ] **Phase 12** — Hermes integration: `~/.hermes/config.yaml` + `mcp test`
 
 ---
