@@ -54,9 +54,9 @@ Master checklist — flip the box when the phase is fully verified.
 - [x] **Phase 5** — `internal/tools`: args types + 5 `CONF_*_DESCRIPTION` constants
 - [x] **Phase 6** — `internal/tools`: `executeRequest()` shared handler helper
 - [x] **Phase 7** — `internal/tools`: five handlers + `safeHandler` panic wrap
-- [ ] **Phase 8** — `internal/server` + `RegisterAll()`: bootstrap + registration
-- [ ] **Phase 9** — `cmd/mcp-confluence/main.go`: full lifecycle (load → serve)
-- [ ] **Phase 10** — Wire + smoke: `make check` + end-to-end JSON-RPC smoke
+- [x] **Phase 8** — `internal/server` + `RegisterAll()`: bootstrap + registration
+- [x] **Phase 9** — `cmd/mcp-confluence/main.go`: full lifecycle (load → serve)
+- [x] **Phase 10** — Wire + smoke: `make check` + end-to-end JSON-RPC smoke
 - [ ] **Phase 11** — Container image: `project.toml` + `make image` green
 - [ ] **Phase 12** — Hermes integration: `~/.hermes/config.yaml` + `mcp test`
 
@@ -871,6 +871,8 @@ Append a bullet after each phase:
 - 2026-07-09 — Phase 5: 5 arg types + verbatim descriptions (14 tests) — sha=`0e1e056`. Dispatched in parallel batch. Vendored `upstream.atlassian.api.tool.ts` for byte-identity check.
 - 2026-07-09 — Phase 2: atlassian.Client wrapper + Auth + APIError (19 tests) — sha=`b6a669a`. go-atlassian v2.12.0 pinned. make check green. Also cleaned pre-existing golangci-lint issues in dotenv.go and tools/args_test.go.
 - 2026-07-09 — Phase 6: executeRequest (9-step shared handler) — sha=`875c4c5`. 13 tests covering 200/TOON, JQ, JSON-format, 4xx/5xx APIError shape, 40k truncation, empty-JQ short-circuit. Pane ran `--yolo` (no permission prompts).
+- 2026-07-09 — Phase 7: 5 handlers + safeHandler + RegisterAll + NewServer — sha=`97542e2`. three commits (97542e2/86e0500/69cf7a5): handlers → RegisterAll → main.go lifecycle. New transport-trampoline pattern (NewWithTransport + pipe-backed stdio) lets main.go detect stdin EOF for clean shutdown. 9 internal/tools tests pass.
+- 2026-07-09 — Phase 10: smoke-test fixes — sha=`b85ea84`. make format/lint/test/check all green; end-to-end JSON-RPC smoke against real Confluence API returns TOON-encoded `/wiki/api/v2/spaces?limit=2` with real space data (smartergroup.atlassian.net). Two bugs found and fixed: (1) atlassian.New was building `https://<site>` instead of `https://<site>.atlassian.net` (violated Q22-locked settings contract); (2) buildURL was URL-encoding `?` inside the path. New tests: TestBuildURL_PathContainsQuery + TestBuildURL_PathAndQueryMerged.
 
 ---
 
