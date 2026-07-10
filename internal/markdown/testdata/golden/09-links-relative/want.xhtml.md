@@ -1,0 +1,1 @@
+[a relative link](../other/page.md)

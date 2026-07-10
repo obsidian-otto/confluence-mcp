@@ -1,0 +1,1 @@
+![alt text describing the diagram](https://example.com/diagram.png)

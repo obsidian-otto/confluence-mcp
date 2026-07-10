@@ -1,0 +1,1 @@
+![sample image](https://example.com/img.png)
