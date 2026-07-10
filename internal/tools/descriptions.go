@@ -255,4 +255,52 @@ const CONF_GET_PAGE_MARKDOWN_DESCRIPTION = `Read a Confluence page with conf_get
 
 |` + templates.Backtick + `Output format:` + templates.Backtick + ` TOON (default) or JSON (` + templates.Backtick + `outputFormat: "json"` + templates.Backtick + `).
 
-|` + templates.Backtick + `Returns:` + templates.Backtick + ` The response envelope (` + templates.Backtick + `pageId, title, markdown` + templates.Backtick + `). To get just the markdown text, set ` + templates.Backtick + `jq: "markdown"` + templates.Backtick + ` on the args.`
+||` + templates.Backtick + `Returns:` + templates.Backtick + ` The response envelope (` + templates.Backtick + `pageId, title, markdown` + templates.Backtick + `). To get just the markdown text, set ` + templates.Backtick + `jq: "markdown"` + templates.Backtick + ` on the args.`
+
+// CONF_UPLOAD_ATTACHMENT_DESCRIPTION documents the conf_upload_attachment
+// tool. Local addition — the upstream has no upload tool — so the
+// upstream-drift guardrail does not apply; the
+// TestNewToolDescriptionsAreSubstantial test enforces the quality bar.
+const CONF_UPLOAD_ATTACHMENT_DESCRIPTION = `Upload a binary file as an attachment to a Confluence page with conf_upload_attachment. Returns TOON format by default.
+
+` + templates.Backtick + `Use this when:` + templates.Backtick + ` You have a file on disk (PNG, PDF, drawio XML, JPEG, SVG, DOCX, XLSX, MP4, ZIP, anything else) and want it attached to a Confluence page. This is the only tool in the server that hits the v1 REST API — Confluence Cloud has no v2 upload endpoint (verified 2026-07-10 against developer.atlassian.com; full rationale in specs/11-attachments/01-research-and-surface.md).
+
+` + templates.Backtick + `Wire shape:` + templates.Backtick + ` Internally sends ` + templates.Backtick + `POST /wiki/rest/api/content/{pageId}/child/attachment` + templates.Backtick + ` with ` + templates.Backtick + `multipart/form-data` + templates.Backtick + ` and the ` + templates.Backtick + `X-Atlassian-Token: no-check` + templates.Backtick + ` CSRF-bypass header (without that header Confluence returns 403). The file is streamed directly from disk via ` + templates.Backtick + `io.Copy` + templates.Backtick + ` — no base64 inflation, so a 10 MB binary stays 10 MB on the wire.
+
+` + templates.Backtick + `File types:` + templates.Backtick + ` PNG, PDF, drawio, JPEG, SVG, DOCX, XLSX, MP4, ZIP — any binary blob. drawio upload is format-agnostic; after upload, use ` + templates.Backtick + `conf_put_markdown` + templates.Backtick + ` (or ` + templates.Backtick + `conf_put` + templates.Backtick + `) to add the ` + templates.Backtick + `<ac:structured-macro ac:name="drawio">` + templates.Backtick + ` block that renders the diagram.
+
+` + templates.Backtick + `Size limits:` + templates.Backtick + ` 100 MB per file is the Atlassian Cloud hard cap (configurable lower per site). Calls over the cap return ` + templates.Backtick + `413 Payload Too Large` + templates.Backtick + ` — pre-flight with ` + templates.Backtick + `stat` + templates.Backtick + ` if you need to check first.
+
+` + templates.Backtick + `When NOT to use this:` + templates.Backtick + ` For text content use ` + templates.Backtick + `conf_post` + templates.Backtick + ` / ` + templates.Backtick + `conf_post_markdown` + templates.Backtick + ` — those write to the page body, not the attachments list.
+
+` + templates.Backtick + `Output format:` + templates.Backtick + ` TOON (default) or JSON (` + templates.Backtick + `outputFormat: "json"` + templates.Backtick + `).
+
+` + templates.Backtick + `Returns:` + templates.Backtick + ` The v1 ` + templates.Backtick + `ContentPageScheme` + templates.Backtick + ` envelope (` + templates.Backtick + `results: [{id, title, mediaType, extensions.fileSize, _links.download, version.number}, ...]` + templates.Backtick + `). Use ` + templates.Backtick + `jq: "results[0].{id: id, title: title, mediaType: mediaType}"` + templates.Backtick + ` to extract the created attachment's metadata.`
+
+// CONF_LIST_ATTACHMENTS_DESCRIPTION documents the conf_list_attachments tool.
+const CONF_LIST_ATTACHMENTS_DESCRIPTION = `List attachments on a Confluence page with conf_list_attachments. Returns TOON format by default.
+
+` + templates.Backtick + `Use this when:` + templates.Backtick + ` You have a page id and want to enumerate its attachments — to find an attachment id for deletion, to audit what files are stored on a page, or to enumerate before bulk operations. Each result has ` + templates.Backtick + `id, title, mediaType, fileSize, _links.download` + templates.Backtick + `.
+
+` + templates.Backtick + `Wire shape:` + templates.Backtick + ` Internally fetches ` + templates.Backtick + `GET /wiki/api/v2/pages/{id}/attachments` + templates.Backtick + ` (a v2 endpoint — unlike the upload path which is v1-only). Cursor-based pagination via the ` + templates.Backtick + `_links.next` + templates.Backtick + ` URL on each response. Max 100 per page (the v2 endpoint cap).
+
+` + templates.Backtick + `Filters:` + templates.Backtick + ` ` + templates.Backtick + `mediaType` + templates.Backtick + ` is a substring match (e.g. ` + templates.Backtick + `"image"` + templates.Backtick + ` matches ` + templates.Backtick + `image/png` + templates.Backtick + `, ` + templates.Backtick + `image/jpeg` + templates.Backtick + `). ` + templates.Backtick + `filename` + templates.Backtick + ` is exact (case-sensitive).
+
+` + templates.Backtick + `Output format:` + templates.Backtick + ` TOON (default) or JSON (` + templates.Backtick + `outputFormat: "json"` + templates.Backtick + `).
+
+` + templates.Backtick + `Returns:` + templates.Backtick + ` v2 ` + templates.Backtick + `MultiEntityResult<Attachment>` + templates.Backtick + ` envelope (` + templates.Backtick + `results: [...], _links.next` + templates.Backtick + `). Use ` + templates.Backtick + `jq: "results[*].{id: id, title: title, mediaType: mediaType}"` + templates.Backtick + ` to extract a compact list.`
+
+// CONF_DELETE_ATTACHMENT_DESCRIPTION documents the conf_delete_attachment tool.
+const CONF_DELETE_ATTACHMENT_DESCRIPTION = `Delete an attachment by id with conf_delete_attachment. Returns TOON format by default.
+
+` + templates.Backtick + `Use this when:` + templates.Backtick + ` You have an attachment id (from ` + templates.Backtick + `conf_list_attachments` + templates.Backtick + ` or the page's attachment metadata) and want to remove it. Default behavior moves the attachment to trash; pass ` + templates.Backtick + `purge: true` + templates.Backtick + ` to permanently delete (irreversible).
+
+` + templates.Backtick + `Wire shape:` + templates.Backtick + ` Internally calls ` + templates.Backtick + `DELETE /wiki/api/v2/attachments/{id}` + templates.Backtick + ` (v2 endpoint) or ` + templates.Backtick + `DELETE /wiki/api/v2/attachments/{id}?purge=true` + templates.Backtick + ` when purging. Most successful deletes return ` + templates.Backtick + `204 No Content` + templates.Backtick + ` with an empty body.
+
+` + templates.Backtick + `Permissions:` + templates.Backtick + ` Requires permission to delete attachments in the page's space. The API enforces the same permissions as the Confluence UI.
+
+` + templates.Backtick + `When NOT to use this:` + templates.Backtick + ` To update an attachment's contents (e.g. upload a new version of the same filename), use ` + templates.Backtick + `conf_upload_attachment` + templates.Backtick + ` with the same ` + templates.Backtick + `pageId` + templates.Backtick + ` — Confluence treats re-uploading the same filename as a new version, not a separate attachment.
+
+` + templates.Backtick + `Output format:` + templates.Backtick + ` TOON (default) or JSON (` + templates.Backtick + `outputFormat: "json"` + templates.Backtick + `).
+
+` + templates.Backtick + `Returns:` + templates.Backtick + ` Empty body on success (204 No Content). On failure, the standard ` + templates.Backtick + `<METHOD> <path>: <status> <text> - <body>` + templates.Backtick + ` error envelope.`

@@ -150,3 +150,69 @@ type HelpArgs struct {
 	// Output format selector.
 	OutputFormat string `json:"outputFormat,omitempty" jsonschema:"description=Output format. Default TOON (preferred for human reading); 'json' for plain JSON."`
 }
+
+// UploadAttachmentArgs is the argument set for the
+// `conf_upload_attachment` tool. Uploads a single binary file from
+// disk as an attachment to a Confluence page.
+//
+// Note: the on-the-wire endpoint is the v1 REST API
+// (POST /wiki/rest/api/content/{pageId}/child/attachment with
+// multipart/form-data + X-Atlassian-Token: no-check). Confluence
+// Cloud has no v2 upload endpoint as of 2026-07-10 — full
+// rationale in specs/11-attachments/01-research-and-surface.md.
+type UploadAttachmentArgs struct {
+	// PageId is the numeric page id the attachment is uploaded to.
+	PageId string `json:"pageId" jsonschema:"description=Numeric page id where the attachment will live (required). Example: '163935'."`
+	// FilePath is the absolute path to the file on disk. The handler
+	// opens it with os.Open and streams via io.Copy — files do NOT
+	// load into memory beyond the multipart body buffer. 100 MB
+	// is the Atlassian Cloud hard cap; calls over the cap return
+	// 413 Payload Too Large from the server.
+	FilePath string `json:"filePath" jsonschema:"description=Absolute path to the file on disk (required). PNG, PDF, drawio XML, JPEG, SVG, DOCX, XLSX, MP4, ZIP all work — the file is uploaded as-is, no base64 inflation. Example: '/home/user/diagram.drawio'."`
+	// Comment is the changelog message for the new attachment
+	// version. Empty string means no comment.
+	Comment string `json:"comment,omitempty" jsonschema:"description=Optional changelog / version comment shown next to the attachment in the page's attachment history. Default: empty."`
+	// MinorEdit marks the new attachment version as a minor edit.
+	// Go's zero value is false, which sends minorEdit=false on the
+	// wire. Pass true explicitly to mark the upload as a minor
+	// version bump.
+	MinorEdit bool `json:"minorEdit,omitempty" jsonschema:"description=Whether the new attachment version is a minor edit. Go's zero value is false (omitted from args = not a minor edit). Set true to mark as a minor version bump."`
+	// OutputFormat selector.
+	OutputFormat string `json:"outputFormat,omitempty" jsonschema:"description=Output format. Default TOON; 'json' for plain JSON."`
+	// JQ filter applied to the response envelope.
+	JQ string `json:"jq,omitempty" jsonschema:"description=Optional JMESPath filter evaluated against the v1 ContentPageScheme envelope (e.g. 'results[0].{id: id, title: title, mediaType: mediaType, fileSize: extensions.fileSize}' to extract a single attachment summary)."`
+}
+
+// ListAttachmentsArgs is the argument set for the
+// `conf_list_attachments` tool. Lists the attachments on a page via
+// the v2 GET /wiki/api/v2/pages/{id}/attachments endpoint.
+type ListAttachmentsArgs struct {
+	// PageId is the numeric page id to list attachments for.
+	PageId string `json:"pageId" jsonschema:"description=Numeric page id whose attachments should be listed (required). Example: '163935'."`
+	// Cursor for v2 cursor-based pagination.
+	Cursor string `json:"cursor,omitempty" jsonschema:"description=Opaque pagination cursor from a previous list_attachments response. Omit for the first page."`
+	// Limit caps results; v2 caps at 100.
+	Limit int `json:"limit,omitempty" jsonschema:"description=Maximum attachments to return. Default 25; max 100 (the v2 endpoint caps at 100)."`
+	// MediaType filters by media type substring (e.g. 'image').
+	MediaType string `json:"mediaType,omitempty" jsonschema:"description=Substring filter on the attachment's mediaType (e.g. 'image' to match image/png and image/jpeg)."`
+	// Filename filters by exact filename.
+	Filename string `json:"filename,omitempty" jsonschema:"description=Exact filename filter (case-sensitive)."`
+	// OutputFormat selector.
+	OutputFormat string `json:"outputFormat,omitempty" jsonschema:"description=Output format. Default TOON; 'json' for plain JSON."`
+	// JQ filter.
+	JQ string `json:"jq,omitempty" jsonschema:"description=Optional JMESPath filter evaluated against the v2 MultiEntityResult<Attachment> envelope."`
+}
+
+// DeleteAttachmentArgs is the argument set for the
+// `conf_delete_attachment` tool. Deletes an attachment by id via
+// the v2 DELETE /wiki/api/v2/attachments/{id} endpoint.
+type DeleteAttachmentArgs struct {
+	// AttachmentId is the attachment's numeric id.
+	AttachmentId string `json:"attachmentId" jsonschema:"description=Numeric attachment id (required). Get the id from list_attachments or the page's attachment metadata."`
+	// Purge permanently deletes (skips trash) when true.
+	Purge bool `json:"purge,omitempty" jsonschema:"description=Set true to permanently delete (purge) the attachment instead of moving it to trash. Default false. Purging is irreversible."`
+	// OutputFormat selector.
+	OutputFormat string `json:"outputFormat,omitempty" jsonschema:"description=Output format. Default TOON; 'json' for plain JSON."`
+	// JQ filter.
+	JQ string `json:"jq,omitempty" jsonschema:"description=Optional JMESPath filter — most DELETE responses are 204 No Content, so jq has nothing to evaluate."`
+}

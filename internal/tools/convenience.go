@@ -264,13 +264,13 @@ type helpEntry struct {
 	Example     string            `json:"example"`
 }
 
-// helpSurface returns the full tool surface (currently 13 tools —
-// the 5 original CRUD tools, 5 convenience tools, and 3 markdown
-// round-trip tools) in tool-name sort order. The descriptions are
-// derived by truncating the registered CONF_*_DESCRIPTION strings to
-// their first paragraph — every description in descriptions.go
-// starts with a single-line summary that the help response can
-// reuse directly.
+// helpSurface returns the full tool surface (currently 16 tools —
+// the 5 original CRUD tools, 5 convenience tools, 3 markdown
+// round-trip tools, and 3 attachment tools) in tool-name sort
+// order. The descriptions are derived by truncating the registered
+// CONF_*_DESCRIPTION strings to their first paragraph — every
+// description in descriptions.go starts with a single-line summary
+// that the help response can reuse directly.
 //
 // If you add or remove a tool here, also update the want-list in
 // TestHandleHelp_ReturnsSurface (convention_test.go).
@@ -420,6 +420,44 @@ func helpSurface() map[string]helpEntry {
 				"jq":           "Optional JMESPath filter on the {pageId, title, markdown} envelope",
 			},
 			Example: `conf_get_page_markdown page-id="163935" jq="markdown"`,
+		},
+		// v3 — Attachment tools. Upload hits v1 (multipart),
+		// list/delete hit v2. Argument keys match the registered
+		// MCP JSON schema.
+		"conf_upload_attachment": {
+			Description: firstParagraph(CONF_UPLOAD_ATTACHMENT_DESCRIPTION),
+			Args: map[string]string{
+				"pageId":       "Numeric page id where the attachment will live (required)",
+				"filePath":     "Absolute path to the file on disk (required); PNG/PDF/drawio/any binary",
+				"comment":      "Optional changelog message",
+				"minorEdit":    "Mark new attachment version as a minor edit (default true)",
+				"outputFormat": "empty = TOON; 'json' for plain JSON",
+				"jq":           "Optional JMESPath filter on the v1 ContentPageScheme response",
+			},
+			Example: `conf_upload_attachment pageId="163935" filePath="/tmp/diagram.drawio" comment="initial upload"`,
+		},
+		"conf_list_attachments": {
+			Description: firstParagraph(CONF_LIST_ATTACHMENTS_DESCRIPTION),
+			Args: map[string]string{
+				"pageId":       "Numeric page id whose attachments to list (required)",
+				"cursor":       "Opaque pagination cursor",
+				"limit":        "Default 25; max 100",
+				"mediaType":    "Substring filter (e.g. 'image')",
+				"filename":     "Exact filename filter",
+				"outputFormat": "empty = TOON; 'json' for plain JSON",
+				"jq":           "Optional JMESPath filter",
+			},
+			Example: `conf_list_attachments pageId="163935" mediaType="image"`,
+		},
+		"conf_delete_attachment": {
+			Description: firstParagraph(CONF_DELETE_ATTACHMENT_DESCRIPTION),
+			Args: map[string]string{
+				"attachmentId": "Numeric attachment id (required)",
+				"purge":        "Set true to permanently delete instead of moving to trash",
+				"outputFormat": "empty = TOON; 'json' for plain JSON",
+				"jq":           "Optional JMESPath filter (most deletes return 204 No Content)",
+			},
+			Example: `conf_delete_attachment attachmentId="att219152391"`,
 		},
 	}
 	return surface

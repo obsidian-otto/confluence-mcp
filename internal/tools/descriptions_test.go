@@ -136,6 +136,13 @@ func TestNewToolDescriptionsAreSubstantial(t *testing.T) {
 		{"CONF_POST_MARKDOWN", CONF_POST_MARKDOWN_DESCRIPTION, "conf_post_markdown", 200, "Returns TOON"},
 		{"CONF_PUT_MARKDOWN", CONF_PUT_MARKDOWN_DESCRIPTION, "conf_put_markdown", 200, "Returns TOON"},
 		{"CONF_GET_PAGE_MARKDOWN", CONF_GET_PAGE_MARKDOWN_DESCRIPTION, "conf_get_page_markdown", 200, "Returns TOON"},
+		// v3 attachment tool descriptions — same quality bar.
+		// The upload description must mention the v1 endpoint +
+		// the X-Atlassian-Token header because that detail is
+		// the key safety / correctness boundary.
+		{"CONF_UPLOAD_ATTACHMENT", CONF_UPLOAD_ATTACHMENT_DESCRIPTION, "conf_upload_attachment", 200, "Returns TOON"},
+		{"CONF_LIST_ATTACHMENTS", CONF_LIST_ATTACHMENTS_DESCRIPTION, "conf_list_attachments", 200, "Returns TOON"},
+		{"CONF_DELETE_ATTACHMENT", CONF_DELETE_ATTACHMENT_DESCRIPTION, "conf_delete_attachment", 200, "Returns TOON"},
 	}
 
 	for _, c := range cases {

@@ -69,6 +69,7 @@ type requestRecorder struct {
 	method     string
 	path       string
 	rawQuery   string
+	headers    http.Header
 	body       []byte
 	respStatus int
 	respBody   []byte
@@ -78,6 +79,7 @@ func (r *requestRecorder) record(req *http.Request) {
 	r.method = req.Method
 	r.path = req.URL.Path
 	r.rawQuery = req.URL.RawQuery
+	r.headers = req.Header.Clone()
 	if req.Body != nil {
 		// Read all of the body so callers can assert on it. Closing
 		// the body is the stdlib http package's job (httptest server

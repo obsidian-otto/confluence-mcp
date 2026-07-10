@@ -4,7 +4,7 @@
 // protocol. It glues together:
 //
 //   - github.com/metoro-io/mcp-golang (the MCP framework; stdio transport)
-//   - internal/tools  (the 13 Confluence tool handlers + safeHandler wrapper)
+//   - internal/tools  (the 16 Confluence tool handlers + safeHandler wrapper)
 //   - internal/atlassian (the HTTP client used by every handler)
 //   - internal/config (the resolved settings)
 //
@@ -24,8 +24,8 @@
 //  2. New() does NOT call tools.RegisterAll directly. Instead it
 //     delegates the registration to the tools package via the
 //     RegisterAll(srv, client) function. This keeps the tools
-//     package self-contained (it owns the 13 tool names, the 13
-//     descriptions, and the 13 handlers) while this package owns
+//     package self-contained (it owns the 16 tool names, the 16
+//     descriptions, and the 16 handlers) while this package owns
 //     the "server exists" concern.
 //
 //  3. The error return from New() is currently always nil. It

@@ -1,4 +1,4 @@
-// Package tools — register.go: the single point where the 5
+// Package tools — register.go: the single point where the 16
 // Confluence tool handlers are wired into a *mcp.Server.
 //
 // RegisterAll is called exactly once: from internal/server.New
@@ -246,6 +246,34 @@ func RegisterAll(srv *mcp.Server, client *atlassian.Client) error {
 			description: CONF_GET_PAGE_MARKDOWN_DESCRIPTION,
 			handler: func(ctx context.Context, args GetPageMarkdownArgs) (*mcp.ToolResponse, error) {
 				return invokeTool(ctx, "conf_get_page_markdown", HandleGetPageMarkdown, client, args)
+			},
+		},
+		// v3 — Attachment tools. conf_upload_attachment hits the
+		// v1 REST endpoint (POST .../child/attachment with
+		// multipart/form-data + X-Atlassian-Token: no-check);
+		// conf_list_attachments and conf_delete_attachment use
+		// the v2 endpoints. See
+		// specs/11-attachments/01-research-and-surface.md for
+		// the v1/v2 split rationale.
+		{
+			name:        "conf_upload_attachment",
+			description: CONF_UPLOAD_ATTACHMENT_DESCRIPTION,
+			handler: func(ctx context.Context, args UploadAttachmentArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_upload_attachment", HandleUploadAttachment, client, args)
+			},
+		},
+		{
+			name:        "conf_list_attachments",
+			description: CONF_LIST_ATTACHMENTS_DESCRIPTION,
+			handler: func(ctx context.Context, args ListAttachmentsArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_list_attachments", HandleListAttachments, client, args)
+			},
+		},
+		{
+			name:        "conf_delete_attachment",
+			description: CONF_DELETE_ATTACHMENT_DESCRIPTION,
+			handler: func(ctx context.Context, args DeleteAttachmentArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_delete_attachment", HandleDeleteAttachment, client, args)
 			},
 		},
 	}

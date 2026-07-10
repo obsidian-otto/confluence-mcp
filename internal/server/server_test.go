@@ -55,12 +55,19 @@ import (
 //     (conf_post_markdown, conf_put_markdown,
 //     conf_get_page_markdown). Local additions, the upstream has
 //     no markdown tools.
+//   - 3 attachments (conf_upload_attachment, conf_list_attachments,
+//     conf_delete_attachment). v3 addition; conf_upload_attachment
+//     is the only v1 REST path in the server (multipart/form-data +
+//     X-Atlassian-Token: no-check). See
+//     specs/11-attachments/01-research-and-surface.md.
 var expectedTools = []string{
 	"conf_delete",
+	"conf_delete_attachment",
 	"conf_get",
 	"conf_get_page_body",
 	"conf_get_page_markdown",
 	"conf_help",
+	"conf_list_attachments",
 	"conf_list_pages",
 	"conf_list_spaces",
 	"conf_patch",
@@ -69,6 +76,7 @@ var expectedTools = []string{
 	"conf_put",
 	"conf_put_markdown",
 	"conf_search",
+	"conf_upload_attachment",
 }
 
 // newDeps returns a *server.ServerDeps with a real, fully-wired
@@ -126,10 +134,10 @@ func TestNew_ConstructsServer(t *testing.T) {
 	}
 }
 
-// TestNew_RegistersAllThirteenTools asserts the 13 tool names are
+// TestNew_RegistersAllSixteenTools asserts the 16 tool names are
 // registered with the returned server. We use the mcp-golang
 // CheckToolRegistered helper — its public surface, no internals.
-func TestNew_RegistersAllThirteenTools(t *testing.T) {
+func TestNew_RegistersAllSixteenTools(t *testing.T) {
 	srv, err := server.New(newDeps(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -142,9 +150,9 @@ func TestNew_RegistersAllThirteenTools(t *testing.T) {
 	}
 }
 
-// TestNew_RegistersExactlyThirteenTools asserts no extra tool is
-// registered. Today there are exactly 13; if a future phase adds a
-// 14th, this test will catch the divergence and force the contract
+// TestNew_RegistersExactlySixteenTools asserts no extra tool is
+// registered. Today there are exactly 16; if a future phase adds a
+// 17th, this test will catch the divergence and force the contract
 // to be re-confirmed. We assert by enumerating the registered set
 // via the public introspection helper and comparing against
 // expectedTools. Because mcp-golang does not expose a public "list
@@ -154,7 +162,7 @@ func TestNew_RegistersAllThirteenTools(t *testing.T) {
 // so we use a "no extra surprises" smoke check: each expected name
 // is present, and a small set of names that MUST NOT exist (e.g.
 // obvious typos, wrong verb casing) are absent.
-func TestNew_RegistersExactlyThirteenTools(t *testing.T) {
+func TestNew_RegistersExactlySixteenTools(t *testing.T) {
 	srv, err := server.New(newDeps(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

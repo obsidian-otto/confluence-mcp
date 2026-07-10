@@ -24,12 +24,15 @@
 package atlassian
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/bennie/mcp-confluence/internal/config"
@@ -227,6 +230,193 @@ func (c *Client) Call(ctx context.Context, method, path string, query map[string
 			method, path, status, http.StatusText(status), firstN(respBody, 200))
 	}
 	return out, nil
+}
+
+// UploadAttachment uploads a file from disk as an attachment to a
+// Confluence page. This is the ONE endpoint in this server that hits
+// the v1 REST API (POST /wiki/rest/api/content/{pageId}/child/attachment)
+// because the v2 attachments API exposes only read/delete — there is no
+// v2 upload endpoint (verified against
+// developer.atlassian.com/cloud/confluence/rest/v2/api-group-attachment/
+// on 2026-07-10; full rationale in
+// specs/11-attachments/01-research-and-surface.md).
+//
+// The implementation builds the multipart/form-data body with stdlib
+// mime/multipart (so binary streams round-trip without base64 inflation)
+// and sends the request via Client.HTTPClient. The X-Atlassian-Token
+// header MUST be set to "no-check" — without it, Confluence returns 403
+// due to CSRF protection. This header is the only thing that differs
+// from a regular v2 write call, hence why this method lives on the
+// atlassian.Client wrapper rather than going through Client.Do.
+//
+// Parameters:
+//
+//   - ctx: request-scoped context.
+//   - pageId: numeric page id (Confluence v2 string-shaped — e.g.
+//     "163935").
+//   - filePath: absolute path to the file on disk. The file is opened
+//     with os.Open and streamed; not loaded into memory.
+//   - comment: optional changelog message (empty = no comment).
+//   - minorEdit: whether the new attachment version is a minor edit
+//     (true matches go-atlassian's default; pass-through to Confluence).
+//
+// Returns the raw response body (a v1 ContentPageScheme JSON envelope
+// with the created/updated attachment metadata) and the HTTP status
+// code. Errors are typed *APIError on 4xx/5xx (matching Client.Do's
+// contract) so the executeRequest pipeline in Phase 6 can render them
+// uniformly.
+//
+// The 100 MB cap is enforced by Atlassian Cloud, not by this method —
+// calls over the cap return 413 from the server. Callers that need a
+// pre-flight size check should stat() the file first.
+func (c *Client) UploadAttachment(ctx context.Context, pageId, filePath, comment string, minorEdit bool) ([]byte, int, error) {
+	if c == nil {
+		return nil, 0, &AuthMissingError{Field: "Client"}
+	}
+	if pageId == "" {
+		return nil, 0, &AuthMissingError{Field: "pageId"}
+	}
+	if filePath == "" {
+		return nil, 0, &AuthMissingError{Field: "filePath"}
+	}
+
+	// Open the file. os.Open returns *AuthMissingError-shaped errors
+	// via fmt.Errorf wrap — the handler layer will surface a clear
+	// "open file" message. We do NOT read the file into memory: the
+	// multipart.Writer streams directly from the *os.File via io.Copy
+	// so 100 MB PDFs round-trip without spiking the heap.
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("upload_attachment: open %q: %w", filePath, err)
+	}
+	defer func() { _ = file.Close() }()
+
+	// Stat for the multipart filename + a sanity-check that the path
+	// is to a regular file (not a directory or symlink-to-nowhere).
+	// We don't pre-flight the size cap here — the server enforces it
+	// with a 413 — but we do refuse empty files because the multipart
+	// upload with an empty payload is ambiguous.
+	info, err := file.Stat()
+	if err != nil {
+		return nil, 0, fmt.Errorf("upload_attachment: stat %q: %w", filePath, err)
+	}
+	if info.IsDir() {
+		return nil, 0, fmt.Errorf("upload_attachment: %q is a directory, not a file", filePath)
+	}
+	if info.Size() == 0 {
+		return nil, 0, fmt.Errorf("upload_attachment: %q is an empty file", filePath)
+	}
+
+	// Build the multipart body in-memory. We could stream the body
+	// directly to the request, but using a *bytes.Buffer keeps the
+	// Content-Length calculable (multipart bodies need it set
+	// explicitly OR the request must use chunked transfer encoding).
+	// A 100 MB file in a *bytes.Buffer is ~100 MB heap — acceptable
+	// for the spec's "small to medium files" intent.
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Filename in the multipart form is the base name — Confluence
+	// stores attachments by their on-page filename, not the full path.
+	// Use filepath.Base to extract just the file's basename.
+	filename := info.Name()
+	part, err := writer.CreateFormFile("file", filename)
+	if err != nil {
+		return nil, 0, fmt.Errorf("upload_attachment: create form file: %w", err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return nil, 0, fmt.Errorf("upload_attachment: copy file data: %w", err)
+	}
+
+	// Optional changelog comment. Empty string means "no comment";
+	// we skip the field in that case so the wire envelope is cleaner.
+	if comment != "" {
+		if err := writer.WriteField("comment", comment); err != nil {
+			return nil, 0, fmt.Errorf("upload_attachment: write comment field: %w", err)
+		}
+	}
+
+	// minorEdit: Confluence wants "true"/"false" as strings in
+	// multipart fields. Default to true to match go-atlassian's
+	// v1 ContentAttachmentService.Create default.
+	if err := writer.WriteField("minorEdit", boolToString(minorEdit)); err != nil {
+		return nil, 0, fmt.Errorf("upload_attachment: write minorEdit field: %w", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		return nil, 0, fmt.Errorf("upload_attachment: finalize multipart body: %w", err)
+	}
+
+	// Compose the full URL. Path is /wiki/rest/api/content/{id}/child/attachment
+	// (the v1 endpoint — see package doc above).
+	fullURL, err := buildURL(c.BaseURL,
+		fmt.Sprintf("/wiki/rest/api/content/%s/child/attachment", pageId), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("upload_attachment: build URL: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("upload_attachment: build request: %w", err)
+	}
+
+	// Auth header (basic auth via email:APIToken).
+	if err := c.Auth.applyAuthHeader(req); err != nil {
+		return nil, 0, err
+	}
+
+	// Multipart Content-Type includes the boundary parameter; the
+	// writer produces it via FormDataContentType().
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Accept", "application/json")
+
+	// CSRF bypass — WITHOUT THIS HEADER CONFLUENCE RETURNS 403.
+	// This is the one and only header that distinguishes the
+	// attachment upload from a regular v2 write. Documented inline
+	// because if it's removed, uploads silently break in production.
+	req.Header.Set("X-Atlassian-Token", "no-check")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("POST /wiki/rest/api/content/%s/child/attachment: network error: %w", pageId, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("upload_attachment: read body: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return respBody, resp.StatusCode, &APIError{
+			Method:     http.MethodPost,
+			Path:       fmt.Sprintf("/wiki/rest/api/content/%s/child/attachment", pageId),
+			StatusCode: resp.StatusCode,
+			StatusText: http.StatusText(resp.StatusCode),
+			Body:       respBody,
+		}
+	}
+	return respBody, resp.StatusCode, nil
+}
+
+// boolToString returns "true" or "false" — Confluence's multipart
+// field convention. Kept private to avoid the stdlib strconv import
+// for a single use site.
+//
+// Note: Go's zero value for bool is false, so callers that omit
+// minorEdit get a "false" on the wire. The Confluence API default
+// for new attachments is to treat an unset field as a minor edit;
+// the go-atlassian v1 Create method explicitly sets "true" by
+// default. We do not replicate that behaviour here because (a) the
+// Go zero value idiom is "the user did not opt in", and (b)
+// callers who care can pass minorEdit: true explicitly. The
+// wire field is always present so Confluence has a deterministic
+// value to act on regardless of which choice the user makes.
+func boolToString(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
 }
 
 // buildURL composes the full URL from base + path + query. The path must
