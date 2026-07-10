@@ -196,9 +196,9 @@ const CONF_SEARCH_DESCRIPTION = `Search Confluence via Confluence Query Language
 // tool. The full tool surface map lives in the response.
 const CONF_HELP_DESCRIPTION = `Show how to use the confluence MCP server — the tool surface in one call.
 
-` + templates.Backtick + `Use this when:` + templates.Backtick + ` You have just discovered the ` + templates.Backtick + `mcp_confluence_*` + templates.Backtick + ` tool prefix and want a tour, or you are not sure which of the ten tools fits the task.
+` + templates.Backtick + `Use this when:` + templates.Backtick + ` You have just discovered the ` + templates.Backtick + `mcp_confluence_*` + templates.Backtick + ` tool prefix and want a tour, or you are not sure which of the thirteen tools fits the task.
 
-` + templates.Backtick + `Response shape:` + templates.Backtick + ` Object with one entry per tool — ` + templates.Backtick + `conf_get, conf_post, conf_put, conf_patch, conf_delete, conf_list_spaces, conf_list_pages, conf_get_page_body, conf_search, conf_help` + templates.Backtick + `. For each tool:
+` + templates.Backtick + `Response shape:` + templates.Backtick + ` Object with one entry per tool — ` + templates.Backtick + `conf_get, conf_post, conf_put, conf_patch, conf_delete, conf_list_spaces, conf_list_pages, conf_get_page_body, conf_search, conf_help, conf_post_markdown, conf_put_markdown, conf_get_page_markdown` + templates.Backtick + `. For each tool:
 - ` + templates.Backtick + `description` + templates.Backtick + `: short purpose (one sentence).
 - ` + templates.Backtick + `args` + templates.Backtick + `: top-level fields with one-line descriptions.
 - ` + templates.Backtick + `example` + templates.Backtick + `: a single concrete invocation.

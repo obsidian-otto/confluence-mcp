@@ -215,24 +215,58 @@ func HandleGetPageMarkdown(ctx context.Context, client *atlassian.Client, args j
 	}
 	// raw is the JSON-encoded upstream envelope (because we
 	// forced OutputFormat: "json" above). The shape is the
-	// page object:
+	// page object. The v2 API nests the body under the
+	// format key — when body-format=storage, the body looks like:
 	//
-	//	{id: ..., title: ..., body: {representation: "storage", value: <XHTML>}, ...}
+	//	{ ..., body: {storage: {representation: "storage", value: <XHTML>}}, ... }
+	//
+	// Older shapes and edge cases (e.g. body-format not echoed
+	// back) also appear in the wild, so we accept either the
+	// nested `body.storage` shape OR a flat `body.{representation,
+	// value}` shape. Whichever matches first wins.
 	var page struct {
 		ID    string `json:"id"`
 		Title string `json:"title"`
 		Body  struct {
+			// Flat shape (some API versions / proxies).
 			Representation string `json:"representation"`
 			Value          string `json:"value"`
+			// Nested-by-format shape (v2 canonical): the value
+			// lives under `body.<format>`. We read the storage
+			// key directly; the field name matches the
+			// `body-format=storage` query param the inner
+			// HandleGetPageBody sends.
+			Storage struct {
+				Representation string `json:"representation"`
+				Value          string `json:"value"`
+			} `json:"storage"`
 		} `json:"body"`
 	}
 	if err := json.Unmarshal([]byte(raw), &page); err != nil {
 		return "", fmt.Errorf("conf_get_page_markdown: decode page envelope: %w", err)
 	}
-	if page.Body.Representation != "storage" {
-		return "", fmt.Errorf("conf_get_page_markdown: expected storage representation, got %q", page.Body.Representation)
+	// Pick the storage value: prefer the nested shape, fall
+	// back to flat. Either way the representation field must
+	// be "storage" — Confluence v2 returns the body in the
+	// format we asked for via body-format=storage.
+	var (
+		bodyRep string
+		bodyVal string
+	)
+	switch {
+	case page.Body.Storage.Value != "":
+		bodyRep = page.Body.Storage.Representation
+		bodyVal = page.Body.Storage.Value
+	case page.Body.Value != "":
+		bodyRep = page.Body.Representation
+		bodyVal = page.Body.Value
+	default:
+		return "", fmt.Errorf("conf_get_page_markdown: page body is empty (no storage body returned by upstream)")
 	}
-	md, err := markdown.StorageXHTMLToMarkdown(page.Body.Value)
+	if bodyRep != "" && bodyRep != "storage" {
+		return "", fmt.Errorf("conf_get_page_markdown: expected storage representation, got %q", bodyRep)
+	}
+	md, err := markdown.StorageXHTMLToMarkdown(bodyVal)
 	if err != nil {
 		return "", fmt.Errorf("conf_get_page_markdown: convert storage XHTML to markdown: %w", err)
 	}

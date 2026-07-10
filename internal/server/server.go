@@ -4,7 +4,7 @@
 // protocol. It glues together:
 //
 //   - github.com/metoro-io/mcp-golang (the MCP framework; stdio transport)
-//   - internal/tools  (the 5 Confluence tool handlers + safeHandler wrapper)
+//   - internal/tools  (the 13 Confluence tool handlers + safeHandler wrapper)
 //   - internal/atlassian (the HTTP client used by every handler)
 //   - internal/config (the resolved settings)
 //
@@ -24,8 +24,8 @@
 //  2. New() does NOT call tools.RegisterAll directly. Instead it
 //     delegates the registration to the tools package via the
 //     RegisterAll(srv, client) function. This keeps the tools
-//     package self-contained (it owns the 5 tool names, the 5
-//     descriptions, and the 5 handlers) while this package owns
+//     package self-contained (it owns the 13 tool names, the 13
+//     descriptions, and the 13 handlers) while this package owns
 //     the "server exists" concern.
 //
 //  3. The error return from New() is currently always nil. It
@@ -98,7 +98,7 @@ type ServerDeps struct {
 	Client *atlassian.Client
 }
 
-// New constructs a *mcp.Server with the stdio transport and the 5
+// New constructs a *mcp.Server with the stdio transport and the 13
 // Confluence tools registered. It does NOT call Serve(); the caller
 // (Phase 9's main.go) is responsible for that.
 //
@@ -159,7 +159,8 @@ func New(deps ServerDeps) (*mcp.Server, error) {
 //
 // All other behavior is identical to New: the same ServerDeps
 // validation, the same ServerName/ServerVersion, the same
-// RegisterAll delegation.
+// RegisterAll delegation (which now wires all 13 tools, not the
+// original 5).
 func NewWithTransport(deps ServerDeps, tr transport.Transport) (*mcp.Server, error) {
 	// Validate deps. We check each field in turn so the error
 	// message names the FIRST missing field; subsequent checks
@@ -178,7 +179,7 @@ func NewWithTransport(deps ServerDeps, tr transport.Transport) (*mcp.Server, err
 	)
 
 	// Delegate registration to the tools package. The tools
-	// package owns the 5 names, the 5 descriptions, and the 5
+	// package owns the 13 names, the 13 descriptions, and the 13
 	// handlers — keeping the server package free of business
 	// logic. RegisterAll is the single point where
 	// metoro-io/mcp-golang's RegisterTool is called.

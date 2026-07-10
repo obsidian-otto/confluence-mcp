@@ -85,18 +85,26 @@ import (
 	"github.com/bennie/mcp-confluence/internal/atlassian"
 )
 
-// RegisterAll wires the 5 Confluence tool handlers into srv. It is
+// RegisterAll wires the 13 Confluence tool handlers into srv. It is
 // idempotent only in the sense that mcp-golang's RegisterTool
 // overwrites any prior registration of the same name; the project
 // does not call RegisterAll twice. The function returns the first
 // registration error (if any) so the caller can surface it as a
 // fail-fast condition.
 //
-// The 5 names are hard-coded to match the upstream
+// The 13 names are: 5 CRUD tools (conf_get / conf_post / conf_put /
+// conf_patch / conf_delete) byte-for-byte from the upstream
 // `@aashari/mcp-server-atlassian-confluence` v3.3.0 tool surface;
-// do not edit them. server_test.go's TestNew_RegistersAllFiveTools
-// and TestNew_RegistersExactlyFiveTools enforce this set
-// membership at the mcp-golang introspection layer.
+// 5 post-v1 quality-of-life tools (conf_list_spaces / conf_list_pages
+// / conf_get_page_body / conf_search / conf_help) added in the
+// 2026-07-10 audit closure; and 3 v2 markdown round-trip tools
+// (conf_post_markdown / conf_put_markdown / conf_get_page_markdown)
+// added in Phase 14/15. Do not edit the 10 upstream-aligned names
+// without re-running the byte-comparison test in
+// descriptions_test.go. server_test.go's
+// TestNew_RegistersAllThirteenTools and
+// TestNew_RegistersExactlyThirteenTools enforce the set membership
+// at the mcp-golang introspection layer.
 //
 // Parameter validation:
 //
@@ -210,6 +218,34 @@ func RegisterAll(srv *mcp.Server, client *atlassian.Client) error {
 			description: CONF_HELP_DESCRIPTION,
 			handler: func(ctx context.Context, args HelpArgs) (*mcp.ToolResponse, error) {
 				return invokeTool(ctx, "conf_help", HandleHelp, client, args)
+			},
+		},
+		// v2 — Markdown round-trip tools (Phase 14/15, local
+		// additions — the upstream has no markdown tools). Each
+		// takes a markdown source (inline OR file path), converts
+		// it to/from Confluence storage XHTML inside the binary
+		// via internal/markdown, and delegates to the existing
+		// CRUD handlers so the 9-step TOON / JMESPath /
+		// truncation pipeline is shared.
+		{
+			name:        "conf_post_markdown",
+			description: CONF_POST_MARKDOWN_DESCRIPTION,
+			handler: func(ctx context.Context, args PostMarkdownArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_post_markdown", HandlePostMarkdown, client, args)
+			},
+		},
+		{
+			name:        "conf_put_markdown",
+			description: CONF_PUT_MARKDOWN_DESCRIPTION,
+			handler: func(ctx context.Context, args PutMarkdownArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_put_markdown", HandlePutMarkdown, client, args)
+			},
+		},
+		{
+			name:        "conf_get_page_markdown",
+			description: CONF_GET_PAGE_MARKDOWN_DESCRIPTION,
+			handler: func(ctx context.Context, args GetPageMarkdownArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_get_page_markdown", HandleGetPageMarkdown, client, args)
 			},
 		},
 	}

@@ -1,17 +1,16 @@
-// Phase 8 — server-bootstrap tests.
+// Phase 15 — server-bootstrap tests.
 //
 // The server package exposes one factory, New(deps), that returns a
-// *mcp.Server with the 5 Confluence tools (conf_get, conf_post,
-// conf_put, conf_patch, conf_delete) already registered. These tests
-// assert:
+// *mcp.Server with the 13 Confluence tools (5 CRUD + 5 quality-of-life
+// + 3 markdown round-trip) already registered. These tests assert:
 //
 //  1. New(deps) returns a non-nil *mcp.Server with no error.
-//  2. The 5 tool names are registered, in any order, and only those.
+//  2. The 13 tool names are registered, in any order, and only those.
 //  3. NewServer propagates a nil-Deps error before doing any work
 //     (defense in depth — the Phase 9 main.go pre-validates, but the
 //     factory must not crash with a nil-deref on a misbehaving caller).
 //  4. The package-level tools package (Phase 7) exposes a
-//     RegisterAll(srv, client) entry point that registers the same 5
+//     RegisterAll(srv, client) entry point that registers the same 13
 //     tools when called against a freshly constructed mcp.Server.
 //
 // We use the mcp-golang public CheckToolRegistered API for
@@ -46,22 +45,29 @@ import (
 // the order, so a future reorganization of the registration loop
 // does not break the test.
 //
-// Post-v1 audit (2026-07-10): the surface grew from 5 to 10 tools.
-// The five CRUD tools (conf_get / conf_post / conf_put / conf_patch
-// / conf_delete) match the upstream server byte-for-byte; the
-// five convenience tools (conf_list_spaces / conf_list_pages /
-// conf_get_page_body / conf_search / conf_help) are local
-// additions for quality-of-life and Hermes tool discovery.
+// Surface history:
+//   - v1 (Phase 8, 2026-07-09):  5 CRUD tools, upstream-aligned.
+//   - v1.1 (audit closure 2026-07-10):  +5 quality-of-life tools
+//     (conf_list_spaces, conf_list_pages, conf_get_page_body,
+//     conf_search, conf_help). Local additions, no upstream
+//     counterpart.
+//   - v2 (Phase 14/15, 2026-07-10):  +3 markdown round-trip tools
+//     (conf_post_markdown, conf_put_markdown,
+//     conf_get_page_markdown). Local additions, the upstream has
+//     no markdown tools.
 var expectedTools = []string{
 	"conf_delete",
 	"conf_get",
 	"conf_get_page_body",
+	"conf_get_page_markdown",
 	"conf_help",
 	"conf_list_pages",
 	"conf_list_spaces",
 	"conf_patch",
 	"conf_post",
+	"conf_post_markdown",
 	"conf_put",
+	"conf_put_markdown",
 	"conf_search",
 }
 
@@ -120,10 +126,10 @@ func TestNew_ConstructsServer(t *testing.T) {
 	}
 }
 
-// TestNew_RegistersAllTenTools asserts the 10 tool names are
+// TestNew_RegistersAllThirteenTools asserts the 13 tool names are
 // registered with the returned server. We use the mcp-golang
 // CheckToolRegistered helper — its public surface, no internals.
-func TestNew_RegistersAllTenTools(t *testing.T) {
+func TestNew_RegistersAllThirteenTools(t *testing.T) {
 	srv, err := server.New(newDeps(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -136,20 +142,19 @@ func TestNew_RegistersAllTenTools(t *testing.T) {
 	}
 }
 
-// TestNew_RegistersExactlyTenTools asserts no extra tool is
-// registered. Today there are exactly 10; if a future phase adds an
-// 11th (e.g. a `conf_export_pdf` helper), this test will catch the
-// divergence and force the contract to be re-confirmed. We assert
-// by enumerating the registered set via the public introspection
-// helper and comparing against expectedTools. Because mcp-golang
-// does not expose a public "list all tools" function (only the
-// bool CheckToolRegistered), we enumerate by checking each name in
-// expectedTools AND every other plausible name; a strict set
-// equality is not directly possible, so we use a "no extra
-// surprises" smoke check: each expected name is present, and a
-// small set of names that MUST NOT exist (e.g. obvious typos,
-// wrong verb casing) are absent.
-func TestNew_RegistersExactlyTenTools(t *testing.T) {
+// TestNew_RegistersExactlyThirteenTools asserts no extra tool is
+// registered. Today there are exactly 13; if a future phase adds a
+// 14th, this test will catch the divergence and force the contract
+// to be re-confirmed. We assert by enumerating the registered set
+// via the public introspection helper and comparing against
+// expectedTools. Because mcp-golang does not expose a public "list
+// all tools" function (only the bool CheckToolRegistered), we
+// enumerate by checking each name in expectedTools AND every other
+// plausible name; a strict set equality is not directly possible,
+// so we use a "no extra surprises" smoke check: each expected name
+// is present, and a small set of names that MUST NOT exist (e.g.
+// obvious typos, wrong verb casing) are absent.
+func TestNew_RegistersExactlyThirteenTools(t *testing.T) {
 	srv, err := server.New(newDeps(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
