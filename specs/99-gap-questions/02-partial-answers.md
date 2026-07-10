@@ -1,4 +1,4 @@
-# 99.2 — Partial Gap Answers (locked 2026-07-09)
+# 99.2 — Partial Gap Answers (locked 2026-07-09; v2 update 2026-07-10)
 
 ## Decisions log
 
@@ -7,6 +7,11 @@
 | Q10 | Stderr-only logs (unchanged); `.env` file replaces upstream's `~/.mcp/configs.json` tier | 2026-07-09 (this update) | User OOB message: "MCP server should load its settings from the environmental variables or from the `.env` file inside the container or cli" |
 | Q14 | Add a Makefile at v1 (not v1.1) as single source of truth | 2026-07-09 (this update) | User OOB message: "Make sure to add a Makefile as per the project skill as a single source of truth for all commands to run in this project" |
 | Q22 | (new question — added this update) | 2026-07-09 | Same user OOB message; surfaced as Q22 with the resolved priority order |
+| Q23 | `internal/markdown` uses `github.com/yuin/goldmark` (md → HTML); **actual pin v1.8.2, not the v1.7.13 initially spec'd**, because `html-to-markdown/v2 v2.5.2`'s `go.mod` hard-requires goldmark ≥ v1.8.2; Go module resolution chose the newer goldmark over a downgrade to h2m v2.5.0. v1.8.2 is API-compatible with v1.7.13 for all symbols the package uses (goldmark.New + GFM + WithRendererOptions). | 2026-07-10 (v2 update; revised post Phase 13) | Library survey spec `specs/10-markdown-roundtrip/01-library-survey.md` §"Locked library decisions" |
+| Q24 | `internal/markdown` uses `github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2` for HTML → md | 2026-07-10 (v2 update) | Same |
+| Q25 | `internal/markdown` uses `github.com/PuerkitoBio/goquery` for the post-processing pass; **actual pin v1.12.0** (latest at build time; spec said "v1.10.x" — go get picked the most recent tag) | 2026-07-10 (v2 update; revised post Phase 13) | Same |
+| Q26 | `internal/markdown` test methodology = h2m's golden-file pattern (`go test -tags update` regenerates) | 2026-07-10 (v2 update) | Same |
+| Q27 | Phase 13 added a `codeMacroRe` pre-processor in `StorageXHTMLToMarkdown` to collapse `<ac:structured-macro ac:name="code">` blocks back to `<pre><code>` before handing to h2m; without it, h2m extracts only the `language` parameter and drops the code body. This is a round-trip-correctness fix, not a workaround, and is now part of the canonical pipeline. | 2026-07-10 (v2 update; recorded post Phase 13) | Phase 13 completion report (commit `ed168e0`) |
 
 **Open questions remaining:** 19 (Q1, Q2, Q3, Q4, Q5, Q6, Q7,
 Q8, Q9, Q11, Q12, Q13, Q15, Q16, Q17, Q18, Q19, Q20, Q21).

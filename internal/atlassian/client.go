@@ -33,6 +33,7 @@ import (
 	"strings"
 
 	"github.com/bennie/mcp-confluence/internal/config"
+	"github.com/bennie/mcp-confluence/internal/templates"
 	"github.com/ctreminiom/go-atlassian/v2/confluence"
 )
 
@@ -87,7 +88,7 @@ func New(cfg *config.Config) (*Client, error) {
 	// "https://acme.atlassian.net". The upstream aashari MCP tool documents
 	// the same convention. (The ATLASSIAN_API_BASE_URL opt-out for Data
 	// Center is gap Q4 — not implemented in v1.)
-	baseURL := "https://" + cfg.SiteName + ".atlassian.net"
+	baseURL := templates.AtlassianBaseURL(cfg.SiteName)
 
 	auth := &Auth{Email: cfg.UserEmail, APIToken: cfg.APIKey}
 

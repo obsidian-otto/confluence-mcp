@@ -25,9 +25,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/bennie/mcp-confluence/internal/atlassian"
+	"github.com/bennie/mcp-confluence/internal/templates"
 	"github.com/bennie/mcp-confluence/internal/toon"
 )
 
@@ -43,8 +45,9 @@ func HandleListSpaces(ctx context.Context, client *atlassian.Client, args json.R
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("conf_list_spaces: decode args: %w", err)
 	}
+	limit := strconv.Itoa(defaultLimit(a.Limit, 25, 250))
 	query := map[string]string{
-		"limit":  fmt.Sprintf("%d", defaultLimit(a.Limit, 25, 250)),
+		"limit":  limit,
 		"cursor": a.Cursor,
 		"type":   a.Type,
 		"status": a.Status,
@@ -53,7 +56,7 @@ func HandleListSpaces(ctx context.Context, client *atlassian.Client, args json.R
 	// but they appear in the URL which is wasteful; strip them.
 	stripEmpty(query)
 	// Re-add the output format so executeRequest sees it.
-	query["limit"] = fmt.Sprintf("%d", defaultLimit(a.Limit, 25, 250))
+	query["limit"] = limit
 	// OutputFormat is on the args struct but executeRequest reads it
 	// off GetArgs — we synthesise that here.
 	return executeRequest(ctx, client, GetArgs{
@@ -76,9 +79,9 @@ func HandleListPages(ctx context.Context, client *atlassian.Client, args json.Ra
 	if err := json.Unmarshal(args, &a); err != nil {
 		return "", fmt.Errorf("conf_list_pages: decode args: %w", err)
 	}
-	limit := defaultLimit(a.Limit, 25, 250)
+	limit := strconv.Itoa(defaultLimit(a.Limit, 25, 250))
 	query := map[string]string{
-		"limit":       fmt.Sprintf("%d", limit),
+		"limit":       limit,
 		"cursor":      a.Cursor,
 		"space-id":    a.SpaceID,
 		"space-key":   a.SpaceKey,
@@ -88,7 +91,7 @@ func HandleListPages(ctx context.Context, client *atlassian.Client, args json.Ra
 		"body-format": a.BodyFormat,
 	}
 	stripEmpty(query)
-	query["limit"] = fmt.Sprintf("%d", limit)
+	query["limit"] = limit
 	return executeRequest(ctx, client, GetArgs{
 		Path:         "/wiki/api/v2/pages",
 		Query:        query,
@@ -97,11 +100,16 @@ func HandleListPages(ctx context.Context, client *atlassian.Client, args json.Ra
 }
 
 // HandleGetPageBody is the `conf_get_page_body` handler. Reads
-// /wiki/api/v2/pages/{id}/body with the chosen body-format. The
-// upstream response contains a `value` field whose contents are
-// format-specific — XHTML for storage, rendered HTML for view, ADF
-// JSON for atlas_doc_format — and we trust the layer above to
-// surface that to the caller.
+// the body of a page. Path note: the Confluence Cloud v2 API does
+// NOT support a `/wiki/api/v2/pages/{id}/body` sub-endpoint — the
+// body is inlined into the GET-page response when the caller
+// supplies `body-format=<storage|view|atlas_doc_format>` as a
+// query-string parameter. Calling the absent /body endpoint
+// returns 404 (we propagate that as a normal APIError). This
+// handler therefore GETs the parent page with the body-format
+// filter and returns the body portion. If the caller wants the
+// full page metadata too, they should use conf_get with the
+// same path.
 func HandleGetPageBody(ctx context.Context, client *atlassian.Client, args json.RawMessage) (string, error) {
 	var a GetPageBodyArgs
 	if err := json.Unmarshal(args, &a); err != nil {
@@ -114,11 +122,16 @@ func HandleGetPageBody(ctx context.Context, client *atlassian.Client, args json.
 	if bodyFormat == "" {
 		bodyFormat = "storage"
 	}
+	// The path itself doesn't carry the query — the body-format
+	// is appended here so the upstream URL is well-formed. The
+	// template literal in internal/templates makes the prefix,
+	// the page-id slot, and the body-format query skeleton
+	// explicit at a glance; an accidental missing slash or
+	// missing '?' would show up in the literal rather than
+	// hiding in a %s placeholder.
+	path := templates.PageBodyPath(a.PageID, bodyFormat)
 	return executeRequest(ctx, client, GetArgs{
-		Path: "/wiki/api/v2/pages/" + a.PageID + "/body",
-		Query: map[string]string{
-			"body-format": bodyFormat,
-		},
+		Path:         path,
 		OutputFormat: a.OutputFormat,
 	}, "GET", nil)
 }
@@ -138,22 +151,22 @@ func HandleSearch(ctx context.Context, client *atlassian.Client, args json.RawMe
 	if a.CQL == "" {
 		return "", fmt.Errorf("conf_search: cql is required")
 	}
-	limit := defaultLimit(a.Limit, 25, 100)
+	limit := strconv.Itoa(defaultLimit(a.Limit, 25, 100))
 	// Confluence v1 search expects `start` as a numeric string when
 	// non-zero; omit otherwise.
 	start := ""
 	if a.Start > 0 {
-		start = fmt.Sprintf("%d", a.Start)
+		start = strconv.Itoa(a.Start)
 	}
 	query := map[string]string{
 		"cql":     a.CQL,
-		"limit":   fmt.Sprintf("%d", limit),
+		"limit":   limit,
 		"start":   start,
 		"excerpt": a.ExcludedContent,
 	}
 	stripEmpty(query)
 	// re-set limit after stripEmpty (it was non-empty by definition above)
-	query["limit"] = fmt.Sprintf("%d", limit)
+	query["limit"] = limit
 	return executeRequest(ctx, client, GetArgs{
 		Path:         "/wiki/rest/api/search",
 		Query:        query,

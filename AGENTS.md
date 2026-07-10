@@ -29,6 +29,48 @@ commands (per the `project` skill), and the MCP server loads
 its settings from environment variables **or** a `.env` file
 (per the user's locked Q22 decision).
 
+## Project goal — bidirectional Markdown ↔ Confluence storage
+
+**Verbatim from the user (2026-07-10):**
+"in the end this project must be able to upload a markdown
+file into confluence using its own markup format, and be able
+to later download confluence documents in their markup format
+and convert it locally to markdown before storing it."
+
+That requirement is now the **primary v2 feature**. Concretely:
+
+  - **Upload direction** — `conf_post_markdown` (and `conf_put_markdown`)
+    accept a markdown body (string or file path), convert it
+    locally to Confluence **storage format XHTML** using
+    `github.com/yuin/goldmark`, and POST/PUT to the existing
+    v2 REST endpoint with the same `{representation: "storage", value: <XHTML>}`
+    envelope the CRUD tools already produce. No round-trip
+    through any external service.
+
+  - **Download direction** — `conf_get_page_body` (already
+    exists for raw storage) gains a sibling
+    `conf_get_page_markdown` that fetches the page, runs the
+    storage XHTML through
+    `github.com/JohannesKaufmann/html-to-markdown/v2`, and
+    returns the markdown text so the caller can write it to
+    disk.
+
+  - **Round-trip fidelity** — the upload path and the
+    download path are NOT required to produce the literal
+    same bytes for the same logical content (markdown is
+    lossy on whitespace and reference-style links). The
+    contract is **no textual content loss**: the markdown
+    text, the page title, code-block contents, list items,
+    table cell contents, and link URLs must survive both
+    directions. Confluence-specific constructs (macros, info
+    panels, mentions, layout sections) are documented as
+    known-lossy on the round-trip back to markdown — see
+    `specs/10-markdown-roundtrip/03-known-lossy-constructs.md`.
+
+  - **The wire format is always Confluence storage XHTML.**
+    Markdown is purely the agent-side representation. The
+    MCP server never speaks markdown to the Atlassian API.
+
 ## Out-of-band user instructions honored
 
 These are the design decisions that came from iterative
@@ -70,10 +112,13 @@ suggestions — an agent MUST NOT second-guess them.
 | MCP framework | `github.com/metoro-io/mcp-golang` (stdio transport at v1) |
 | JMESPath library | `github.com/jmespath/go-jmespath` (canonical Go JMESPath) |
 | TOON encoder | Custom 150-LOC encoder in `internal/toon/` (no production Go library exists) |
+| Markdown → HTML (v2) | `github.com/yuin/goldmark v1.7.13` (CommonMark + GFM, MIT, 35k+ dependents, used by `grantcarthew/acon`) |
+| HTML → Markdown (v2) | `github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2` (MIT, 3.7k stars, plugin-based, golden-file test corpus) |
+| Storage-format XHTML normalizer | `github.com/PuerkitoBio/goquery` (tokenised HTML walk for the Confluence-specific post-processing pass — see `specs/10-markdown-roundtrip/02-post-processing.md`) |
 | External CLI for build | `pack` 0.27+, `docker` 20.10+, `go` 1.23+ (verified on this host) |
 | Hermes integration | `mcp_servers:` block in `~/.hermes/config.yaml` + stdio transport |
 | Settings source | env vars **or** `.env` file (per Q22 lock; 30-LOC stdlib parser) |
-| License | MIT (matches upstream) |
+| License | MIT (matches upstream; goldmark and html-to-markdown are both MIT, so dependency closure is clean) |
 
 ## Project Layout
 
@@ -94,6 +139,11 @@ confluence-mcp/                              (Go module root — this directory)
     ├── atlassian/                            # Wrapper around go-atlassian confluence.Client
     ├── jmespath/                             # JMESPath wrapper
     ├── toon/                                 # TOON encoder (~150 LOC)
+    ├── markdown/                             # v2 — markdown ↔ storage XHTML bidirectional converter
+    │   ├── markdown_to_storage.go           # goldmark → HTML → storage XHTML post-processor
+    │   ├── storage_to_markdown.go           # html-to-markdown wrapper
+    │   ├── storage_normalize.go             # shared: html.Parse + namespace stripping for ac: / ri:
+    │   └── testdata/                         # gold-file fixtures; golden-file lock pattern from html-to-markdown
     ├── tools/                                # 5 tool handlers + registration
     └── server/                               # mcp-golang server bootstrap
 └── specs/                                    # this project's spec set (Variant B, 4 sections)
@@ -109,6 +159,7 @@ confluence-mcp/                              (Go module root — this directory)
     ├── 07-paketo-buildpack/                  # project.toml + pack build + verification
     ├── 08-deployment-hermes/                 # config.yaml + manifest.yaml + sample invocation
     ├── 09-anti-patterns/                     # stdout pollution + secret handling + error shapes
+    ├── 10-markdown-roundtrip/                # v2 — library survey + wire-format contract + lossy-constructs register
     ├── 99-gap-questions/                     # 22 open decisions + locked partial-answers log
     └── research/                             # provenance + VERIFICATION REPORT
 ```

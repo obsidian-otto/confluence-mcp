@@ -62,6 +62,36 @@ Master checklist — flip the box when the phase is fully verified.
 
 ---
 
+## v2 — Markdown round-trip (2026-07-10, in progress)
+
+User's verbatim 2026-07-10 requirement: *"in the end this
+project must be able to upload a markdown file into
+confluence using its own markup format, and be able to later
+download confluence documents in their markup format and
+convert it locally to markdown before storing it."*
+
+Adds 3 new MCP tools on top of the v1 surface: `conf_post_markdown`,
+`conf_put_markdown`, `conf_get_page_markdown`. The
+conversion happens entirely inside the Go binary using
+`github.com/yuin/goldmark` (md → HTML) and
+`github.com/JohannesKaufmann/html-to-markdown/v2` (HTML → md),
+with a goquery-based post-processor that bridges goldmark's
+CommonMark HTML to Confluence's storage-format XHTML.
+
+Spec set: `specs/10-markdown-roundtrip/` (6 files).
+Lock-ins: Q23 = goldmark v1.7.13, Q24 = html-to-markdown v2.5.2,
+Q25 = goquery v1.10.x for the post-processor, Q26 = h2m's
+golden-file test pattern.
+
+Phases 13 and 14 are parallel-safe; Phase 15 is sequential
+(depends on both).
+
+- [ ] **Phase 13** — `internal/markdown` package: 3-stage pipeline + 28 golden-file tests *(parallel w/ 14)*
+- [ ] **Phase 14** — 3 new tool handlers + args types + descriptions *(parallel w/ 13)*
+- [ ] **Phase 15** — Register new tools, rebuild image, smoke against live Confluence
+
+---
+
 ## Orchestration
 
 The plan is executed by **the orchestrator (this Hermes session)** dispatching
@@ -816,6 +846,251 @@ tools register. Then run `hermes mcp test confluence conf_get --path
 the response is TOON-encoded with real data. Report your full result on
 phase-12-done including whether you committed ~/.hermes/config.yaml.
 ```
+
+---
+
+## Phase 13 — `internal/markdown` package ⚡ *parallel w/ Phase 14*
+
+**Token budget:** ~256k soft · **Subagent:** yes (Hermes pane A) ·
+**Parallel-safe:** yes (with Phase 14)
+
+**Objective:** `internal/markdown` package with the 3-stage
+md → storage XHTML pipeline and the 28-golden-file test
+corpus. Uses `github.com/yuin/goldmark` for stage 1,
+`github.com/PuerkitoBio/goquery` for stage 2, and
+`github.com/JohannesKaufmann/html-to-markdown/v2` for the
+reverse direction. Does NOT yet wire the new tools to the
+MCP server (Phase 15).
+
+**Tasks**
+
+- [ ] `go get github.com/yuin/goldmark@v1.7.13`
+- [ ] `go get github.com/PuerkitoBio/goquery@latest`
+- [ ] `go get github.com/JohannesKaufmann/html-to-markdown/v2@v2.5.2`
+- [ ] Write `internal/markdown/markdown_to_storage_test.go`
+  with per-rule unit tests (code block wrapping, image
+  → ac:image, link → ac:link, namespace injection,
+  self-closing tags). Run — expect FAIL.
+- [ ] Write `internal/markdown/markdown_to_storage.go`:
+  - `MarkdownToStorageXHTML(md string) (string, error)`
+  - internal `htmlPostProcess(html string) (string, error)`
+    using goquery
+- [ ] Tests pass.
+- [ ] Write `internal/markdown/storage_to_markdown_test.go`:
+  storage input → expected markdown for tables, code
+  blocks, links, headings, blockquotes, strikethrough,
+  task lists. Run — expect FAIL.
+- [ ] Write `internal/markdown/storage_to_markdown.go`:
+  `StorageXHTMLToMarkdown(xhtml string) (string, error)`
+  using html-to-markdown v2.
+- [ ] Tests pass.
+- [ ] Create `internal/markdown/testdata/golden/` with
+  28 fixture directories (mirror
+  `acon/testdata/README.md`'s feature-support matrix).
+  Write `internal/markdown/testdata/roundtrip_test.go` that
+  walks every fixture and asserts the pipeline output
+  matches the golden file.
+- [ ] Add a `-update` test tag (mirror h2m's pattern) so
+  `go test -tags update ./internal/markdown/...` regenerates
+  goldens.
+- [ ] `make check` green.
+- [ ] Commit: `feat(markdown): internal/markdown package with golden-file tests`
+
+**Spec to follow:** `specs/10-markdown-roundtrip/01-library-survey.md`,
+`specs/10-markdown-roundtrip/02-post-processing.md`,
+`specs/10-markdown-roundtrip/05-test-strategy.md`.
+
+**Verification**
+
+- [ ] All 28 golden-file round-trip tests pass
+- [ ] `TestRoundTripPreservesText` (the no-content-loss
+  test from spec 03) passes for all 14 "preserved"
+  feature categories
+- [ ] `grep -r "AGPL\|SSPL\|Commons Clause" go.sum` returns 0
+- [ ] `go list -m github.com/yuin/goldmark
+  github.com/JohannesKaufmann/html-to-markdown/v2
+  github.com/PuerkitoBio/goquery` shows the pinned
+  versions from the spec
+- [ ] `make check` exits 0
+
+**Kickoff prompt body** (publish to `phase-13-prompt` in parallel with Phase 14):
+
+```
+You are implementing Phase 13 of the mcp-confluence v2 plan
+at /home/bennie/Desktop/hermes/confluence-mcp/IMPLEMENTATION_PLAN.md
+(the "v2 — Markdown round-trip" section, Phase 13). Read the
+plan, then the spec set at specs/10-markdown-roundtrip/ (6 files,
+especially 01-library-survey.md, 02-post-processing.md, and
+05-test-strategy.md). Implement the internal/markdown/ package
+exactly per the spec's 3-stage pipeline (goldmark → goquery
+post-processor → storage XHTML; reverse direction via
+html-to-markdown v2). Pin the three dependencies in go.mod
+(goldmark v1.7.13, html-to-markdown v2.5.2, goquery latest).
+Do NOT add any MCP tool wiring (Phase 15 does that). Write
+28 golden-file fixtures under internal/markdown/testdata/golden/
+(mirror acon's feature-support matrix). Add a -tags update
+test flag so `go test -tags update` regenerates goldens.
+Write TestRoundTripPreservesText from spec 03 to lock the
+"no textual content loss" contract. Run make check. Commit.
+Report sha on phase-13-done: { phase:13, sha:..., ok:true, notes:... }.
+```
+
+---
+
+## Phase 14 — 3 new tool handlers + args types + descriptions ⚡ *parallel w/ Phase 13*
+
+**Token budget:** ~256k soft · **Subagent:** yes (Hermes pane B) ·
+**Parallel-safe:** yes (with Phase 13)
+
+**Objective:** The 3 new args structs (`PostMarkdownArgs`,
+`PutMarkdownArgs`, `GetPageMarkdownArgs`) and their 3
+handlers (`HandlePostMarkdown`, `HandlePutMarkdown`,
+`HandleGetPageMarkdown`). The handlers delegate to
+`HandlePost` / `HandlePut` / `HandleGetPageBody` after the
+conversion step. Does NOT yet register the tools (Phase 15).
+
+**Tasks**
+
+- [ ] Write `internal/tools/markdown_args_test.go` (round-trip
+  JSON unmarshal of the 3 new args types). Run — expect
+  FAIL.
+- [ ] Write `internal/tools/markdown_args.go`: 3 new args
+  structs with `jsonschema:"description=..."` tags (mirror
+  the existing 10 args structs).
+- [ ] Tests pass.
+- [ ] Write `internal/tools/markdown_handlers_test.go`:
+  per-handler unit tests (conversion happens, envelope
+  built correctly, delegation to underlying handler). Use
+  an `httptest.NewServer` for the integration path so
+  the handlers can be tested without a live Confluence.
+  Run — expect FAIL.
+- [ ] Write `internal/tools/markdown_handlers.go`:
+  - `HandlePostMarkdown(ctx, client, args) (string, error)`
+  - `HandlePutMarkdown(...)`
+  - `HandleGetPageMarkdown(...)`
+  - Each reads its `markdown` field (or `markdownFile`
+    from disk), calls `markdown.MarkdownToStorageXHTML` /
+    `markdown.StorageXHTMLToMarkdown`, builds the wire
+    shape, and delegates to the existing CRUD handler.
+- [ ] Tests pass.
+- [ ] Add 3 new `CONF_*_MARKDOWN_DESCRIPTION` constants
+  to `internal/tools/descriptions.go`. These are NOT
+  byte-identical to upstream (the upstream has no
+  markdown tools); they are local additions, so the
+  `TestNewToolDescriptionsAreSubstantial` test from
+  Phase 5 applies (must mention the tool name in prose,
+  ≥200 chars, contain a "Returns" or "Converts" hint).
+- [ ] `make check` green.
+- [ ] Commit: `feat(tools): conf_post_markdown + conf_put_markdown + conf_get_page_markdown`
+
+**Spec to follow:** `specs/10-markdown-roundtrip/04-tool-surface.md`
+and `specs/10-markdown-roundtrip/03-known-lossy-constructs.md`.
+
+**Verification**
+
+- [ ] The 3 new args types round-trip JSON
+- [ ] The 3 new handlers call the underlying CRUD
+  handlers with the correct envelope (verified by
+  capturing the httptest server's request body and
+  asserting byte-equality on the storage XHTML after
+  the round-trip through the markdown pipeline)
+- [ ] The 3 new descriptions are ≥200 chars and
+  mention the tool name in prose
+- [ ] `make check` exits 0
+
+**Kickoff prompt body** (publish to `phase-14-prompt` in parallel with Phase 13):
+
+```
+You are implementing Phase 14 of the mcp-confluence v2 plan
+at /home/bennie/Desktop/hermes/confluence-mcp/IMPLEMENTATION_PLAN.md
+(the "v2 — Markdown round-trip" section, Phase 14). Read the
+plan, then specs/10-markdown-roundtrip/04-tool-surface.md and
+03-known-lossy-constructs.md. Implement the 3 new tool
+handlers (HandlePostMarkdown, HandlePutMarkdown,
+HandleGetPageMarkdown) and their 3 args structs
+(PostMarkdownArgs, PutMarkdownArgs, GetPageMarkdownArgs).
+Each handler delegates to the existing CRUD handler
+(HandlePost / HandlePut / HandleGetPageBody) after the
+markdown conversion step. Use httptest.NewServer for the
+test fixture (no live Confluence in this phase). The 3 new
+descriptions are local additions, not byte-identical to
+upstream — see TestNewToolDescriptionsAreSubstantial in
+descriptions_test.go for the quality bar. Do NOT register
+the new tools with the MCP server (Phase 15). Run make
+check. Commit. Report sha on phase-14-done: { phase:14, sha:..., ok:true, notes:... }.
+```
+
+---
+
+## Phase 15 — Register new tools, rebuild image, live smoke
+
+**Token budget:** ~256k soft · **Subagent:** yes ·
+**Parallel-safe:** no (depends on 13 + 14)
+
+**Objective:** Wire the 3 new tools into the MCP server,
+rebuild the OCI image, and exercise the markdown tools
+against the live Confluence instance. After this phase
+the server exposes 13 tools total.
+
+**Tasks**
+
+- [ ] Edit `internal/server/server.go` and
+  `internal/tools/register.go` to register the 3 new
+  handlers with the exact names `conf_post_markdown`,
+  `conf_put_markdown`, `conf_get_page_markdown`.
+- [ ] Update the `expectedTools` test variable in
+  `internal/server/server_test.go` from 10 to 13. Rename
+  the test from `TestNew_RegistersAllTenTools` to
+  `TestNew_RegistersAllThirteenTools`.
+- [ ] `make test` — all 13 tools registered; test
+  passes.
+- [ ] `make check` green.
+- [ ] `make image` — confirm the new OCI image builds
+  with the 3 new tools.
+- [ ] `make image-inspect` — confirm the static binary
+  is the entrypoint.
+- [ ] Live smoke test: run the rebuilt binary, call
+  `conf_post_markdown` to create a page under the user's
+  Confluence space, then call `conf_get_page_markdown`
+  to read it back, assert the markdown contains the
+  expected text. Clean up the page after the test
+  (via `conf_delete`).
+- [ ] Commit: `feat(register): 3 markdown tools registered, 13 total`
+
+**Spec to follow:** `specs/10-markdown-roundtrip/04-tool-surface.md`.
+
+**Verification**
+
+- [ ] `hermes mcp test confluence` lists 13 tools
+- [ ] `make check` exits 0
+- [ ] `make image` produces a working OCI image
+- [ ] Live smoke: page created via markdown, read
+  back as markdown, content matches; page deleted
+  cleanly
+- [ ] `grep -r "fmt.Println" cmd/ internal/` returns 0
+  matches (anti-pattern invariant from v1 still holds)
+
+**Kickoff prompt body** (publish to `phase-15-prompt`):
+
+```
+You are implementing Phase 15 of the mcp-confluence v2 plan
+at /home/bennie/Desktop/hermes/confluence-mcp/IMPLEMENTATION_PLAN.md
+(the "v2 — Markdown round-trip" section, Phase 15). Read the
+plan, then specs/10-markdown-roundtrip/04-tool-surface.md.
+Register the 3 new tools (conf_post_markdown, conf_put_markdown,
+conf_get_page_markdown) with the MCP server. Update the
+expectedTools test from 10 to 13. Run make test, make check,
+make image, make image-inspect. Then do a live smoke test
+against the real Confluence instance (the user has
+ATLASSIAN_* env vars in ~/.hermes/.env): create a small
+markdown page via conf_post_markdown, read it back via
+conf_get_page_markdown, assert the markdown text matches
+the input, then delete the page via conf_delete. Publish
+the smoke-test excerpt (redacted) and the commit sha on
+phase-15-done: { phase:15, sha:..., ok:true, notes:... }.
+```
+
+---
 
 ---
 
