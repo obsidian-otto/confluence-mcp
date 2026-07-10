@@ -892,7 +892,52 @@ The plan is complete when:
 - [x] All 12 implementation phases are checked off in **§ Progress index**
 - [x] `make check` exits 0
 - [x] `make image` produces a working OCI image
-- [x] `hermes mcp test confluence` lists 5 tools
+- [x] `hermes mcp test confluence` lists 10 tools (5 CRUD + 5 post-v1 quality-of-life)
 - [x] An end-to-end `conf_get` call returns real Confluence data in TOON format
 - [x] The README at the project root links to this plan and to `specs/`
 - [x] Every **§ Cross-phase guarantees** checkbox is flipped
+
+---
+
+## Post-v1 audit closure (2026-07-10)
+
+After Phase 12 was complete, an end-to-end smoke test surfaced one
+real schema-accuracy gap and one usability gap. Both are closed in
+a single follow-up commit (the same session, `dca7f0c` on the
+working tree). The full record lives at
+`specs/99-gap-questions/04-post-v1-audit-2026-07-10-closed.md`.
+
+### What changed
+
+- **Explicit `jsonschema:` tags on every field of every args
+  struct.** The original plan/Phase-5 task took the Go-reflective
+  default for the JSON schema; that worked at the wire level but
+  produced vague descriptions for `body` (no `description=...`).
+  Now every field has a non-empty `jsonschema:"description=..."`
+  tag with an inline example, so MCP clients see concrete
+  guidance instead of `type: object` with no semantics.
+- **Five quality-of-life tools added.** `conf_list_spaces`,
+  `conf_list_pages`, `conf_get_page_body`, `conf_search`,
+  `conf_help`. Each delegates to `executeRequest` so the
+  9-step TOON/JMESPath/truncation pipeline is shared with the
+  CRUD tools. `conf_help` is local-only (no network) so it works
+  even when Confluence is unreachable.
+- **Server registration widened from 5 to 10 tools**, with the
+  `expectedTools` test variable and the
+  `TestNew_RegistersAll{Ten,ExactlyTen}Tools` test names
+  matching. The old `TestNew_RegistersAllFiveTools` was renamed.
+
+### What didn't change
+
+- The five CRUD tool descriptions remain byte-identical to
+  upstream `@aashari/mcp-server-atlassian-confluence` v3.3.0;
+  `TestDescriptionConstantsMatchUpstream` still byte-compares
+  every constant against the vendored upstream source.
+- The `body` field's wire shape was always correct (`type:
+  object` for POST/PUT, `type: array` for PATCH); the audit's
+  earlier suspicion that the schema declared `items: object`
+  for POST/PUT was wrong. The fix is documentation richness,
+  not a structural change. See the closed audit doc for the
+  full root-cause.
+- Build, lint, image, deploy, registration — all unchanged
+  from Phase 12.
