@@ -437,6 +437,15 @@ func TestArgsJsonschemaTagsPresent(t *testing.T) {
 		GetPageBodyArgs{},
 		SearchArgs{},
 		HelpArgs{},
+		// v2 markdown tool args (Phase 14). The
+		// `TestArgsJsonschemaTagsPresent` test asserts every
+		// args struct has non-empty `jsonschema:"description=..."`
+		// tags; including the new types here means the same
+		// quality bar applies to the markdown round-trip
+		// surface.
+		PostMarkdownArgs{},
+		PutMarkdownArgs{},
+		GetPageMarkdownArgs{},
 	}
 
 	for _, a := range argTypes {
@@ -499,6 +508,16 @@ func TestArgsSchemasAreAccurate(t *testing.T) {
 		{"GetPageBodyArgs", GetPageBodyArgs{}, []string{"page-id"}, "", ""},
 		{"SearchArgs", SearchArgs{}, []string{"cql"}, "", ""},
 		{"HelpArgs", HelpArgs{}, nil, "", ""},
+		// v2 markdown tool args (Phase 14). The "required"
+		// assertions match the per-tool contract:
+		//   - post_markdown: spaceId + title are required
+		//   - put_markdown:  pageId is required
+		//   - get_page_markdown: page-id is required
+		// Markdown/markdownFile are NOT required (either-or);
+		// the handler enforces the "at least one" rule.
+		{"PostMarkdownArgs", PostMarkdownArgs{}, []string{"spaceId", "title"}, "", ""},
+		{"PutMarkdownArgs", PutMarkdownArgs{}, []string{"pageId"}, "", ""},
+		{"GetPageMarkdownArgs", GetPageMarkdownArgs{}, []string{"page-id"}, "", ""},
 	}
 
 	for _, tc := range cases {

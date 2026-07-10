@@ -124,6 +124,18 @@ func TestNewToolDescriptionsAreSubstantial(t *testing.T) {
 		// first sentence must mention TOON-as-the-default elsewhere
 		// rather than as its own return format.
 		{"CONF_HELP", CONF_HELP_DESCRIPTION, "confluence", 200, "TOON"},
+		// The three v2 markdown tool descriptions are local additions
+		// (the upstream has no markdown tools). Each must satisfy
+		// the same quality bar as the other new descriptions: ≥200
+		// chars, mention the tool name in prose, contain a "Returns"
+		// or "Converts" hint. The test name is the const identifier;
+		// the `mentions` field is the tool name as it appears in
+		// prose; the `mustContain` field picks up the format hint
+		// (every tool returns TOON by default, except where the
+		// tool's primary purpose is the conversion itself).
+		{"CONF_POST_MARKDOWN", CONF_POST_MARKDOWN_DESCRIPTION, "conf_post_markdown", 200, "Returns TOON"},
+		{"CONF_PUT_MARKDOWN", CONF_PUT_MARKDOWN_DESCRIPTION, "conf_put_markdown", 200, "Returns TOON"},
+		{"CONF_GET_PAGE_MARKDOWN", CONF_GET_PAGE_MARKDOWN_DESCRIPTION, "conf_get_page_markdown", 200, "Returns TOON"},
 	}
 
 	for _, c := range cases {
