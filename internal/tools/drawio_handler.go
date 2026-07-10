@@ -219,7 +219,7 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 		// isn't left with a useless empty page on their
 		// space.
 		if initialPage != nil {
-			_ = deletePage(ctx, client, pageID, initialPage.Version)
+			_ = deletePage(ctx, client, pageID, initialPage.Version.Number)
 		}
 		return "", fmt.Errorf("conf_upload_drawio: upload attachment: %w", err)
 	}
@@ -252,7 +252,7 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 	if initialPage != nil {
 		// Newly-created page: PUT the body with the
 		// version number from the create response.
-		updated, perr := updatePageBody(ctx, client, pageID, storageValue, a.Title, initialPage.Version+1)
+		updated, perr := updatePageBody(ctx, client, pageID, storageValue, a.Title, initialPage.Version.Number+1)
 		if perr != nil {
 			return "", fmt.Errorf("conf_upload_drawio: set page body: %w (attachment %q is orphaned on page %s)", perr, attachment.ID, pageID)
 		}
@@ -275,12 +275,12 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 	envelope := map[string]any{
 		"attachmentId":      attachment.ID,
 		"attachmentTitle":   attachment.Title,
-		"attachmentVersion": attachment.Version,
+		"attachmentVersion": attachment.Version.Number,
 		"diagramName":       diagramName,
 		"page": map[string]any{
 			"id":      finalPage.ID,
 			"title":   finalPage.Title,
-			"version": finalPage.Version,
+			"version": finalPage.Version.Number,
 		},
 	}
 
@@ -320,19 +320,33 @@ func stderrForDrawio() interface {
 
 // pageEnvelope is the minimal subset of the v2 page envelope
 // we care about for the drawio flow: id, title, version.
+//
+// The v2 page envelope has a nested version object
+// ({"number": 1, "message": "", "minorEdit": false, ...}) rather
+// than a flat int. Live smoke test on 2026-07-10 caught this —
+// the original handler assumed version was an int.
 type pageEnvelope struct {
 	ID      string `json:"id"`
 	Title   string `json:"title"`
-	Version int    `json:"version"`
+	Version struct {
+		Number int `json:"number"`
+	} `json:"version"`
 }
 
 // attachmentEnvelope is the minimal subset of the v1 attachment
 // envelope (inside ContentPageScheme.Results[i]) that we care
-// about for the drawio flow: id, title, version.
+// about for the drawio flow: id, title, version number.
+//
+// The v1 ContentPageScheme envelope has a nested version object
+// ({"by": ..., "when": ..., "number": 1, "minorEdit": false, ...})
+// rather than a flat int. Live smoke test on 2026-07-10 caught
+// this — the original handler assumed version was an int.
 type attachmentEnvelope struct {
 	ID      string `json:"id"`
 	Title   string `json:"title"`
-	Version int    `json:"version"`
+	Version struct {
+		Number int `json:"number"`
+	} `json:"version"`
 }
 
 // parseAttachmentFromUploadResponse pulls the first attachment
@@ -447,10 +461,10 @@ func fetchPageVersion(ctx context.Context, client *atlassian.Client, pageID stri
 	if err := jsonFromMap(respBody, &env); err != nil {
 		return 0, fmt.Errorf("decode fetch-page response: %w", err)
 	}
-	if env.Version == 0 {
+	if env.Version.Number == 0 {
 		return 0, fmt.Errorf("fetch-page response has version=0")
 	}
-	return env.Version, nil
+	return env.Version.Number, nil
 }
 
 // deletePage removes a page by id (used to roll back a

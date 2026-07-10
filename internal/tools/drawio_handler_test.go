@@ -129,13 +129,13 @@ func TestHandleUploadDrawio_ExistingPage_FlowOrder(t *testing.T) {
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/wiki/rest/api/content/163935/child/attachment":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"results":[{"id":"att999","title":"arch.drawio.png","version":1}]}`))
+			_, _ = w.Write([]byte(`{"results":[{"id":"att999","title":"arch.drawio.png","version":{"number":1}}]}`))
 		case r.Method == "GET" && r.URL.Path == "/wiki/api/v2/pages/163935":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"id":"163935","title":"Smoke test","version":3}`))
+			_, _ = w.Write([]byte(`{"id":"163935","title":"Smoke test","version":{"number":3}}`))
 		case r.Method == "PUT" && r.URL.Path == "/wiki/api/v2/pages/163935":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"id":"163935","title":"Smoke test","version":4}`))
+			_, _ = w.Write([]byte(`{"id":"163935","title":"Smoke test","version":{"number":4}}`))
 		default:
 			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusInternalServerError)
@@ -202,13 +202,13 @@ func TestHandleUploadDrawio_NewPage_CreatesFirst(t *testing.T) {
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/wiki/api/v2/pages":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"id":"555","title":"New diagram","version":1}`))
+			_, _ = w.Write([]byte(`{"id":"555","title":"New diagram","version":{"number":1}}`))
 		case r.Method == "POST" && r.URL.Path == "/wiki/rest/api/content/555/child/attachment":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"results":[{"id":"att777","title":"d.drawio.png","version":1}]}`))
+			_, _ = w.Write([]byte(`{"results":[{"id":"att777","title":"d.drawio.png","version":{"number":1}}]}`))
 		case r.Method == "PUT" && r.URL.Path == "/wiki/api/v2/pages/555":
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"id":"555","title":"New diagram","version":2}`))
+			_, _ = w.Write([]byte(`{"id":"555","title":"New diagram","version":{"number":2}}`))
 		default:
 			t.Errorf("unexpected call: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusInternalServerError)
@@ -247,7 +247,7 @@ func TestHandleUploadDrawio_NewPage_CreatesFirst(t *testing.T) {
 // contains the correct macro XHTML with the diagramName.
 func TestHandleUploadDrawio_MacroEnvelope(t *testing.T) {
 	srv, rec := newTestClient(t)
-	rec.setResponse(http.StatusOK, `{"results":[{"id":"att1","title":"d.drawio.png","version":1}]}`)
+	rec.setResponse(http.StatusOK, `{"results":[{"id":"att1","title":"d.drawio.png","version":{"number":1}}]}`)
 
 	// Override to also respond to GET + PUT calls the handler
 	// makes after the upload. Use a wrapping handler that
@@ -257,9 +257,9 @@ func TestHandleUploadDrawio_MacroEnvelope(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == "POST" && r.URL.Path == "/wiki/rest/api/content/1/child/attachment":
-			_, _ = w.Write([]byte(`{"results":[{"id":"att1","title":"d.drawio.png","version":1}]}`))
+			_, _ = w.Write([]byte(`{"results":[{"id":"att1","title":"d.drawio.png","version":{"number":1}}]}`))
 		case r.Method == "GET":
-			_, _ = w.Write([]byte(`{"id":"1","title":"P","version":1}`))
+			_, _ = w.Write([]byte(`{"id":"1","title":"P","version":{"number":1}}`))
 		case r.Method == "PUT":
 			buf := make([]byte, 0, 1024)
 			tmp := make([]byte, 1024)
@@ -273,7 +273,7 @@ func TestHandleUploadDrawio_MacroEnvelope(t *testing.T) {
 				}
 			}
 			putBody = buf
-			_, _ = w.Write([]byte(`{"id":"1","title":"P","version":2}`))
+			_, _ = w.Write([]byte(`{"id":"1","title":"P","version":{"number":2}}`))
 		default:
 			_, _ = w.Write([]byte(`{}`))
 		}
@@ -371,11 +371,11 @@ func TestHandleUploadDrawio_SvgPassthrough(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			switch {
 			case r.Method == "POST" && r.URL.Path == "/wiki/rest/api/content/9/child/attachment":
-				_, _ = w.Write([]byte(`{"results":[{"id":"att888","title":"d.drawio.svg","version":1}]}`))
+				_, _ = w.Write([]byte(`{"results":[{"id":"att888","title":"d.drawio.svg","version":{"number":1}}]}`))
 			case r.Method == "GET":
-				_, _ = w.Write([]byte(`{"id":"9","title":"P","version":1}`))
+				_, _ = w.Write([]byte(`{"id":"9","title":"P","version":{"number":1}}`))
 			case r.Method == "PUT":
-				_, _ = w.Write([]byte(`{"id":"9","title":"P","version":2}`))
+				_, _ = w.Write([]byte(`{"id":"9","title":"P","version":{"number":2}}`))
 			default:
 				_, _ = w.Write([]byte(`{}`))
 			}
