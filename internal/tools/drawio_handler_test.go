@@ -321,6 +321,15 @@ func TestHandleUploadDrawio_MacroEnvelope(t *testing.T) {
 	if !strings.Contains(storageValue, `ac:macro-id="drawio-mcp-confluence"`) {
 		t.Errorf("storage value missing stable macro-id: %s", storageValue)
 	}
+
+	// Title round-trip: the GET response on line 262 returns
+	// title="P" which the handler must include in the PUT
+	// body so v2 doesn't reject it with "Only a Page with a
+	// status of DRAFT can have an empty title" (live smoke
+	// test on 2026-07-10).
+	if got := body["title"]; got != "P" {
+		t.Errorf("PUT body.title = %v, want 'P' (the page's existing title from the GET response)", got)
+	}
 }
 
 // TestHandleUploadDrawio_SvgPassthrough asserts that when the

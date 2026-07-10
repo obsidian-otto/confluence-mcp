@@ -252,7 +252,7 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 	if initialPage != nil {
 		// Newly-created page: PUT the body with the
 		// version number from the create response.
-		updated, perr := updatePageBody(ctx, client, pageID, storageValue, a.Title, initialPage.Version.Number+1)
+		updated, perr := updatePageBody(ctx, client, pageID, storageValue, a.Title, "", initialPage.Version.Number+1)
 		if perr != nil {
 			return "", fmt.Errorf("conf_upload_drawio: set page body: %w (attachment %q is orphaned on page %s)", perr, attachment.ID, pageID)
 		}
@@ -260,11 +260,11 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 	} else {
 		// Existing page: we need the current version
 		// number. Fetch it, then PUT with version+1.
-		currentVersion, ferr := fetchPageVersion(ctx, client, pageID)
+		currentTitle, currentVersion, ferr := fetchPage(ctx, client, pageID)
 		if ferr != nil {
-			return "", fmt.Errorf("conf_upload_drawio: fetch current page version: %w (attachment %q is on page %s but body was not updated)", ferr, attachment.ID, pageID)
+			return "", fmt.Errorf("conf_upload_drawio: fetch current page: %w (attachment %q is on page %s but body was not updated)", ferr, attachment.ID, pageID)
 		}
-		updated, uerr := updatePageBody(ctx, client, pageID, storageValue, "", currentVersion+1)
+		updated, uerr := updatePageBody(ctx, client, pageID, storageValue, "", currentTitle, currentVersion+1)
 		if uerr != nil {
 			return "", fmt.Errorf("conf_upload_drawio: update page body: %w (attachment %q is orphaned on page %s)", uerr, attachment.ID, pageID)
 		}
@@ -409,11 +409,18 @@ func createEmptyPage(ctx context.Context, client *atlassian.Client, spaceID, tit
 // with the supplied storage XHTML. The caller must pass the
 // next version number (current+1 for existing pages, or the
 // create response's version+1 for newly-created pages). If
-// titleOverride is empty the existing title is kept; if set,
-// the page is renamed at the same time (used by the
-// spaceId+title path which already set a title at create time
-// but we keep this hook for callers who want to update it).
-func updatePageBody(ctx context.Context, client *atlassian.Client, pageID, storageValue, titleOverride string, version int) (*pageEnvelope, error) {
+// titleOverride is empty, the caller MUST also pass
+// currentTitle (the page's existing title) — the v2 API
+// rejects a PUT body with no title unless status=DRAFT. We
+// always emit a title in the body to keep the request simple.
+//
+// The reason for the title round-trip on existing pages:
+// the v2 PUT endpoint requires either a non-empty title or
+// a status of "draft". For our purposes we're always
+// updating a "current" page, so we have to include the
+// title. Fetching it once during the existing-page branch
+// is the cleanest way to avoid the round-trip on every call.
+func updatePageBody(ctx context.Context, client *atlassian.Client, pageID, storageValue, titleOverride, currentTitle string, version int) (*pageEnvelope, error) {
 	body := map[string]any{
 		"id":     pageID,
 		"status": "current",
@@ -425,9 +432,18 @@ func updatePageBody(ctx context.Context, client *atlassian.Client, pageID, stora
 			"number": version,
 		},
 	}
-	if titleOverride != "" {
-		body["title"] = titleOverride
+	// titleOverride wins when the caller explicitly sets it
+	// (new-page path); otherwise fall back to currentTitle
+	// (existing-page path). If BOTH are empty, fail loudly
+	// rather than send a malformed PUT.
+	title := titleOverride
+	if title == "" {
+		title = currentTitle
 	}
+	if title == "" {
+		return nil, fmt.Errorf("update page body: title is required for PUT (caller must supply titleOverride or currentTitle)")
+	}
+	body["title"] = title
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("encode update-page body: %w", err)
@@ -446,25 +462,29 @@ func updatePageBody(ctx context.Context, client *atlassian.Client, pageID, stora
 	return &env, nil
 }
 
-// fetchPageVersion returns the current version number of an
-// existing page so the caller can compute version+1 for the
-// PUT. The GET is via the v2 endpoint with no body-format
-// (just metadata).
-func fetchPageVersion(ctx context.Context, client *atlassian.Client, pageID string) (int, error) {
+// fetchPage returns the current title and version number of an
+// existing page so the caller can compute version+1 and supply
+// the title for the PUT body. The GET is via the v2 endpoint
+// with no body-format (just metadata).
+//
+// Title is needed because the v2 PUT endpoint rejects a body
+// with an empty title unless status=DRAFT — see updatePageBody
+// below for the full rationale.
+func fetchPage(ctx context.Context, client *atlassian.Client, pageID string) (title string, version int, err error) {
 	path := "/wiki/api/v2/pages/" + pageID
 	respBody, err := client.Call(ctx, "GET", path, nil, nil)
 	if err != nil {
-		return 0, err
+		return "", 0, err
 	}
 
 	var env pageEnvelope
 	if err := jsonFromMap(respBody, &env); err != nil {
-		return 0, fmt.Errorf("decode fetch-page response: %w", err)
+		return "", 0, fmt.Errorf("decode fetch-page response: %w", err)
 	}
 	if env.Version.Number == 0 {
-		return 0, fmt.Errorf("fetch-page response has version=0")
+		return "", 0, fmt.Errorf("fetch-page response has version=0")
 	}
-	return env.Version.Number, nil
+	return env.Title, env.Version.Number, nil
 }
 
 // deletePage removes a page by id (used to roll back a
