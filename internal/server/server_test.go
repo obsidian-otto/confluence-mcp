@@ -60,6 +60,10 @@ import (
 //     is the only v1 REST path in the server (multipart/form-data +
 //     X-Atlassian-Token: no-check). See
 //     specs/11-attachments/01-research-and-surface.md.
+//   - 1 drawio (conf_upload_drawio). v3 orchestrator: uploads a
+//     .drawio / .drawio.png / .drawio.svg file AND embeds it
+//     on the page in one call (v1 multipart POST + v2 page
+//     PUT). See specs/12-drawio-attachments/01-research-and-surface.md.
 var expectedTools = []string{
 	"conf_delete",
 	"conf_delete_attachment",
@@ -77,6 +81,7 @@ var expectedTools = []string{
 	"conf_put_markdown",
 	"conf_search",
 	"conf_upload_attachment",
+	"conf_upload_drawio",
 }
 
 // newDeps returns a *server.ServerDeps with a real, fully-wired
@@ -134,10 +139,10 @@ func TestNew_ConstructsServer(t *testing.T) {
 	}
 }
 
-// TestNew_RegistersAllSixteenTools asserts the 16 tool names are
+// TestNew_RegistersAllSeventeenTools asserts the 17 tool names are
 // registered with the returned server. We use the mcp-golang
 // CheckToolRegistered helper — its public surface, no internals.
-func TestNew_RegistersAllSixteenTools(t *testing.T) {
+func TestNew_RegistersAllSeventeenTools(t *testing.T) {
 	srv, err := server.New(newDeps(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -150,9 +155,9 @@ func TestNew_RegistersAllSixteenTools(t *testing.T) {
 	}
 }
 
-// TestNew_RegistersExactlySixteenTools asserts no extra tool is
-// registered. Today there are exactly 16; if a future phase adds a
-// 17th, this test will catch the divergence and force the contract
+// TestNew_RegistersExactlySeventeenTools asserts no extra tool is
+// registered. Today there are exactly 17; if a future phase adds a
+// 18th, this test will catch the divergence and force the contract
 // to be re-confirmed. We assert by enumerating the registered set
 // via the public introspection helper and comparing against
 // expectedTools. Because mcp-golang does not expose a public "list
@@ -162,7 +167,7 @@ func TestNew_RegistersAllSixteenTools(t *testing.T) {
 // so we use a "no extra surprises" smoke check: each expected name
 // is present, and a small set of names that MUST NOT exist (e.g.
 // obvious typos, wrong verb casing) are absent.
-func TestNew_RegistersExactlySixteenTools(t *testing.T) {
+func TestNew_RegistersExactlySeventeenTools(t *testing.T) {
 	srv, err := server.New(newDeps(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

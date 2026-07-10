@@ -1,4 +1,4 @@
-// Package tools — register.go: the single point where the 16
+// Package tools — register.go: the single point where the 17
 // Confluence tool handlers are wired into a *mcp.Server.
 //
 // RegisterAll is called exactly once: from internal/server.New
@@ -274,6 +274,19 @@ func RegisterAll(srv *mcp.Server, client *atlassian.Client) error {
 			description: CONF_DELETE_ATTACHMENT_DESCRIPTION,
 			handler: func(ctx context.Context, args DeleteAttachmentArgs) (*mcp.ToolResponse, error) {
 				return invokeTool(ctx, "conf_delete_attachment", HandleDeleteAttachment, client, args)
+			},
+		},
+		// v3 — drawio attachment orchestrator. Uploads a
+		// .drawio / .drawio.png / .drawio.svg file AND embeds
+		// it on the page in one call. See
+		// specs/12-drawio-attachments/01-research-and-surface.md
+		// for the 2-step wire flow (v1 upload + v2 page PUT)
+		// and the macro envelope shape.
+		{
+			name:        "conf_upload_drawio",
+			description: CONF_UPLOAD_DRAWIO_DESCRIPTION,
+			handler: func(ctx context.Context, args UploadDrawioArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_upload_drawio", HandleUploadDrawio, client, args)
 			},
 		},
 	}

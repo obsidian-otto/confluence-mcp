@@ -264,13 +264,14 @@ type helpEntry struct {
 	Example     string            `json:"example"`
 }
 
-// helpSurface returns the full tool surface (currently 16 tools —
+// helpSurface returns the full tool surface (currently 17 tools —
 // the 5 original CRUD tools, 5 convenience tools, 3 markdown
-// round-trip tools, and 3 attachment tools) in tool-name sort
-// order. The descriptions are derived by truncating the registered
-// CONF_*_DESCRIPTION strings to their first paragraph — every
-// description in descriptions.go starts with a single-line summary
-// that the help response can reuse directly.
+// round-trip tools, 3 attachment tools, and 1 drawio orchestrator)
+// in tool-name sort order. The descriptions are derived by
+// truncating the registered CONF_*_DESCRIPTION strings to their
+// first paragraph — every description in descriptions.go starts
+// with a single-line summary that the help response can reuse
+// directly.
 //
 // If you add or remove a tool here, also update the want-list in
 // TestHandleHelp_ReturnsSurface (convention_test.go).
@@ -458,6 +459,29 @@ func helpSurface() map[string]helpEntry {
 				"jq":           "Optional JMESPath filter (most deletes return 204 No Content)",
 			},
 			Example: `conf_delete_attachment attachmentId="att219152391"`,
+		},
+		// v3 — drawio orchestrator. Accepts a .drawio file
+		// (auto-wrapped into .drawio.png) or a pre-prepared
+		// .drawio.png / .drawio.svg. The three mutually-
+		// exclusive input flags are drawioFile / drawioPngFile
+		// / drawioSvgFile.
+		"conf_upload_drawio": {
+			Description: firstParagraph(CONF_UPLOAD_DRAWIO_DESCRIPTION),
+			Args: map[string]string{
+				"pageId":             "Numeric id of an existing page to embed on (mutually exclusive with spaceId)",
+				"spaceId":            "Numeric space id for creating a new page (mutually exclusive with pageId)",
+				"title":              "Title for the new page (required when spaceId is set)",
+				"drawioFile":         "Path to a standalone .drawio XML file (auto-wrapped into .drawio.png)",
+				"drawioPngFile":      "Path to an already-prepared .drawio.png (uploaded verbatim)",
+				"drawioSvgFile":      "Path to a .drawio.svg (uploaded verbatim; drawio XML is in the root 'content' attribute)",
+				"diagramDisplayName": "Display name (defaults to input filename without extension)",
+				"width":              "Macro width in pixels (default 1151)",
+				"height":             "Macro height in pixels (default 911)",
+				"comment":            "Optional attachment changelog",
+				"outputFormat":       "empty = TOON; 'json' for plain JSON",
+				"jq":                 "Optional JMESPath filter on the response envelope",
+			},
+			Example: `conf_upload_drawio pageId="163935" drawioFile="/tmp/architecture.drawio" diagramDisplayName="architecture"`,
 		},
 	}
 	return surface

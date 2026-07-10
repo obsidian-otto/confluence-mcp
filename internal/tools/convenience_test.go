@@ -131,7 +131,7 @@ func TestHandleSearch_RequiresCQL(t *testing.T) {
 // surface is built from in-package constants and does not call
 // executeRequest, so the assertion can be exact: the response
 // is valid JSON, has a "tools" object, and that object contains
-// each of the sixteen tool names.
+// each of the seventeen tool names.
 func TestHandleHelp_ReturnsSurface(t *testing.T) {
 	t.Parallel()
 
@@ -156,15 +156,16 @@ func TestHandleHelp_ReturnsSurface(t *testing.T) {
 		t.Errorf("default topic = %q, want 'all'", resp.Topic)
 	}
 
-	// The full 16-tool surface: 5 CRUD + 5 convenience + 3 markdown
-	// + 3 attachments. Keep this in sync with helpSurface() in
-	// convenience.go.
+	// The full 17-tool surface: 5 CRUD + 5 convenience + 3 markdown
+	// + 3 attachments + 1 drawio. Keep this in sync with
+	// helpSurface() in convenience.go.
 	want := []string{
 		"conf_get", "conf_post", "conf_put", "conf_patch", "conf_delete",
 		"conf_list_spaces", "conf_list_pages", "conf_get_page_body",
 		"conf_search", "conf_help",
 		"conf_post_markdown", "conf_put_markdown", "conf_get_page_markdown",
 		"conf_upload_attachment", "conf_list_attachments", "conf_delete_attachment",
+		"conf_upload_drawio",
 	}
 	for _, name := range want {
 		entry, ok := resp.Tools[name]

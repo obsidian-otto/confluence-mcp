@@ -216,3 +216,60 @@ type DeleteAttachmentArgs struct {
 	// JQ filter.
 	JQ string `json:"jq,omitempty" jsonschema:"description=Optional JMESPath filter — most DELETE responses are 204 No Content, so jq has nothing to evaluate."`
 }
+
+// UploadDrawioArgs is the argument set for the `conf_upload_drawio`
+// tool. Uploads a drawio file (XML, or PNG/SVG with embedded XML)
+// AND embeds it on the page in one call. See
+// specs/12-drawio-attachments/01-research-and-surface.md for the
+// full design rationale.
+//
+// Exactly one of `drawioFile`, `drawioPngFile`, or `drawioSvgFile`
+// must be set (precedence: drawioFile > drawioPngFile > drawioSvgFile).
+// Exactly one of `pageId` (existing page) or `spaceId` (create a
+// new page) must be set.
+type UploadDrawioArgs struct {
+	// PageId is the numeric page id to embed the diagram on
+	// (mutually exclusive with spaceId). When set, the tool
+	// updates the page body to add the drawio macro referencing
+	// the uploaded attachment.
+	PageId string `json:"pageId,omitempty" jsonschema:"description=Numeric page id of an EXISTING page to embed the diagram on. Mutually exclusive with spaceId. Provide pageId for an existing page or spaceId+title for a new page."`
+	// SpaceId is the numeric space id to create a new page in
+	// (mutually exclusive with pageId). When set, the tool
+	// creates a new page with the title and body containing
+	// the drawio macro.
+	SpaceId string `json:"spaceId,omitempty" jsonschema:"description=Numeric space id for creating a new page. Mutually exclusive with pageId. Provide spaceId+title for a new page or pageId for an existing page."`
+	// Title is the new page title (required when SpaceId is
+	// set; ignored when PageId is set — the existing title is
+	// kept).
+	Title string `json:"title,omitempty" jsonschema:"description=Title for the new page (required when spaceId is set; ignored when pageId is set)."`
+	// DrawioFile is the path to a standalone .drawio XML file
+	// on disk. The tool wraps it into a .drawio.png using the
+	// algorithm documented in md2conf's render.py (URL-encode,
+	// raw DEFLATE, base64, embed in PNG tEXt chunk) and uploads
+	// the resulting PNG.
+	DrawioFile string `json:"drawioFile,omitempty" jsonschema:"description=Path to a standalone .drawio XML file on disk. The tool wraps it into a .drawio.png using the md2conf algorithm. Mutually exclusive with drawioPngFile and drawioSvgFile."`
+	// DrawioPngFile is the path to an already-prepared
+	// .drawio.png on disk. Uploaded as-is.
+	DrawioPngFile string `json:"drawioPngFile,omitempty" jsonschema:"description=Path to an already-prepared .drawio.png on disk (PNG with drawio XML embedded in a tEXt chunk with keyword 'mxfile'). Uploaded verbatim. Mutually exclusive with drawioFile and drawioSvgFile."`
+	// DrawioSvgFile is the path to an already-prepared
+	// .drawio.svg on disk. Uploaded as-is. The drawio XML is
+	// stored in the root <svg> element's `content` attribute.
+	DrawioSvgFile string `json:"drawioSvgFile,omitempty" jsonschema:"description=Path to a .drawio.svg file on disk (SVG with drawio XML embedded in the root element's 'content' attribute). Uploaded verbatim. Mutually exclusive with drawioFile and drawioPngFile."`
+	// DiagramDisplayName is the diagram name shown in the
+	// editor. Defaults to the basename of the input file
+	// without the .drawio/.png/.svg extension. This is the
+	// value the drawio macro's
+	// <ac:parameter ac:name='diagramName'> references — and
+	// the macro resolves to the attachment by this filename.
+	DiagramDisplayName string `json:"diagramDisplayName,omitempty" jsonschema:"description=Display name for the diagram (defaults to the input filename without extension). Becomes the value of <ac:parameter ac:name='diagramName'> in the macro; the macro resolves to the attachment by this filename."`
+	// Width is the macro width in pixels (default 1151).
+	Width int `json:"width,omitempty" jsonschema:"description=Macro width in pixels. Default 1151 (matches the editor's default embed size)."`
+	// Height is the macro height in pixels (default 911).
+	Height int `json:"height,omitempty" jsonschema:"description=Macro height in pixels. Default 911 (matches the editor's default embed size)."`
+	// Comment is the attachment changelog (default empty).
+	Comment string `json:"comment,omitempty" jsonschema:"description=Optional changelog message stored on the attachment."`
+	// OutputFormat selector.
+	OutputFormat string `json:"outputFormat,omitempty" jsonschema:"description=Output format. Default TOON; 'json' for plain JSON."`
+	// JQ filter.
+	JQ string `json:"jq,omitempty" jsonschema:"description=Optional JMESPath filter evaluated against the response envelope (attachmentId, attachmentTitle, attachmentVersion, diagramName, page)."`
+}
