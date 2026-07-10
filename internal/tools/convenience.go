@@ -206,10 +206,13 @@ func HandleHelp(_ context.Context, _ *atlassian.Client, args json.RawMessage) (s
 		topic = "all"
 	}
 
+	// Note is self-reporting — `len(surface)` is always the live
+	// count, so adding or removing a tool from helpSurface() can
+	// never make this string lie.
 	out := map[string]any{
 		"topic": topic,
 		"tools": filterSurfaceByTopic(surface, topic),
-		"note":  "All ten tools return TOON format by default; set outputFormat=\"json\" to get plain JSON.",
+		"note":  fmt.Sprintf("All %d tools return TOON format by default; set outputFormat=\"json\" to get plain JSON.", len(surface)),
 		"defaults": map[string]any{
 			"limit":        "25 (max 250 for /v2/ endpoints; max 100 for search)",
 			"outputFormat": "",
@@ -261,11 +264,16 @@ type helpEntry struct {
 	Example     string            `json:"example"`
 }
 
-// helpSurface returns the full ten-tool surface in tool-name sort
-// order. The descriptions are derived by truncating the registered
-// CONF_*_DESCRIPTION strings to their first paragraph — every
-// description in descriptions.go starts with a single-line summary
-// that the help response can reuse directly.
+// helpSurface returns the full tool surface (currently 13 tools —
+// the 5 original CRUD tools, 5 convenience tools, and 3 markdown
+// round-trip tools) in tool-name sort order. The descriptions are
+// derived by truncating the registered CONF_*_DESCRIPTION strings to
+// their first paragraph — every description in descriptions.go
+// starts with a single-line summary that the help response can
+// reuse directly.
+//
+// If you add or remove a tool here, also update the want-list in
+// TestHandleHelp_ReturnsSurface (convention_test.go).
 func helpSurface() map[string]helpEntry {
 	surface := map[string]helpEntry{
 		"conf_get": {
@@ -374,6 +382,44 @@ func helpSurface() map[string]helpEntry {
 				"outputFormat": "empty = TOON; 'json' for plain JSON",
 			},
 			Example: `conf_help topic="conf_search"`,
+		},
+		// v2 — Markdown round-trip tools. Accept a markdown source
+		// inline or from a file path; the handler converts to/from
+		// Confluence storage XHTML inside the binary. The
+		// markdown/markdownFile argument names match the JSON
+		// schema on the registered MCP tool.
+		"conf_post_markdown": {
+			Description: firstParagraph(CONF_POST_MARKDOWN_DESCRIPTION),
+			Args: map[string]string{
+				"spaceId":      "Numeric space id where the new page will live (required)",
+				"title":        "Title for the new page (required)",
+				"markdown":     "Inline markdown source (alternative to markdownFile)",
+				"markdownFile": "Absolute path to a markdown file on disk (alternative to markdown)",
+				"parentId":     "Optional parent page id; omit for a top-level page",
+				"status":       "'current' (default) for an active page",
+				"outputFormat": "empty = TOON; 'json' for plain JSON",
+			},
+			Example: `conf_post_markdown spaceId="163842" title="Hello" markdown="# Heading"`,
+		},
+		"conf_put_markdown": {
+			Description: firstParagraph(CONF_PUT_MARKDOWN_DESCRIPTION),
+			Args: map[string]string{
+				"pageId":       "Numeric page id of the page to update (required)",
+				"title":        "New page title (omit to keep the existing title)",
+				"markdown":     "Inline markdown source (alternative to markdownFile)",
+				"markdownFile": "Absolute path to a markdown file on disk (alternative to markdown)",
+				"outputFormat": "empty = TOON; 'json' for plain JSON",
+			},
+			Example: `conf_put_markdown pageId="163935" markdown="## Updated section"`,
+		},
+		"conf_get_page_markdown": {
+			Description: firstParagraph(CONF_GET_PAGE_MARKDOWN_DESCRIPTION),
+			Args: map[string]string{
+				"page-id":      "Numeric page id (required)",
+				"outputFormat": "empty = TOON; 'json' for plain JSON",
+				"jq":           "Optional JMESPath filter on the {pageId, title, markdown} envelope",
+			},
+			Example: `conf_get_page_markdown page-id="163935" jq="markdown"`,
 		},
 	}
 	return surface
