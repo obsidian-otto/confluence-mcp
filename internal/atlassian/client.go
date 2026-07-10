@@ -31,6 +31,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"strings"
@@ -320,7 +321,29 @@ func (c *Client) UploadAttachment(ctx context.Context, pageId, filePath, comment
 	// stores attachments by their on-page filename, not the full path.
 	// Use filepath.Base to extract just the file's basename.
 	filename := info.Name()
-	part, err := writer.CreateFormFile("file", filename)
+	// Detect the file's MIME type from its extension so
+	// Confluence indexes the attachment correctly. Without
+	// this, the file part's Content-Type defaults to
+	// application/octet-stream, which causes the drawio
+	// marketplace app to fail with "Invalid descriptor" when
+	// trying to read a .drawio file (it expects
+	// application/vnd.jgraph.mxfile), and other apps to
+	// mis-detect file types.
+	contentType := detectContentType(filename)
+	var part io.Writer
+	if contentType != "" {
+		// CreateFormFile with the explicit Content-Type via
+		// CreatePart (CreateFormFile doesn't accept a type).
+		// We build the form file header manually so the
+		// part's Content-Type reflects the actual file type.
+		fheader := textproto.MIMEHeader{}
+		fheader.Set("Content-Disposition",
+			fmt.Sprintf(`form-data; name="file"; filename=%q`, filename))
+		fheader.Set("Content-Type", contentType)
+		part, err = writer.CreatePart(fheader)
+	} else {
+		part, err = writer.CreateFormFile("file", filename)
+	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("upload_attachment: create form file: %w", err)
 	}
@@ -488,4 +511,71 @@ func firstN(b []byte, n int) string {
 		return string(b)
 	}
 	return string(b[:n])
+}
+
+// detectContentType returns the MIME type for an attachment
+// filename, or "" if no mapping is known. The mapping covers
+// the file types the mcp-confluence tools are most likely to
+// upload: PNG/JPEG for images, PDF for documents, the special
+// "drawio" MIME type for .drawio XML (the drawio marketplace
+// app refuses to open .drawio files uploaded as
+// application/octet-stream), and a handful of common archive
+// / office formats.
+//
+// The mapping is intentionally hand-curated rather than using
+// Go's mime.TypeByExtension (which on Linux is empty because
+// the OS /etc/mime.types lookup is gated behind a cgo build
+// tag). Hand-curating also lets us pin the drawio MIME type
+// — the most important entry — to the value the drawio
+// marketplace app requires.
+func detectContentType(filename string) string {
+	// Find the extension (case-insensitive). For multi-dot
+	// names like "architecture.drawio.png" we want the LAST
+	// extension, not just the last segment.
+	ext := strings.ToLower(filename)
+	if i := strings.LastIndex(ext, "."); i >= 0 {
+		ext = ext[i+1:]
+	}
+	switch ext {
+	case "png":
+		return "image/png"
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "gif":
+		return "image/gif"
+	case "webp":
+		return "image/webp"
+	case "svg":
+		return "image/svg+xml"
+	case "pdf":
+		return "application/pdf"
+	case "zip":
+		return "application/zip"
+	case "doc", "docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case "xls", "xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case "ppt", "pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case "json":
+		return "application/json"
+	case "xml":
+		return "application/xml"
+	case "txt", "log", "md":
+		return "text/plain"
+	case "html", "htm":
+		return "text/html"
+	case "css":
+		return "text/css"
+	case "js":
+		return "application/javascript"
+	// The drawio file format. The marketplace app reads
+	// this MIME type to identify the attachment as a
+	// diagram; if it sees application/octet-stream it
+	// fails with "Invalid descriptor".
+	case "drawio":
+		return "application/vnd.jgraph.mxfile"
+	default:
+		return ""
+	}
 }
