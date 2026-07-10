@@ -114,3 +114,95 @@ const CONF_DELETE_DESCRIPTION = `Delete Confluence resources. Returns TOON forma
 Note: Most DELETE endpoints return 204 No Content on success.
 
 API reference: https://developer.atlassian.com/cloud/confluence/rest/v2/`
+
+// CONF_LIST_SPACES_DESCRIPTION documents the conf_list_spaces tool.
+const CONF_LIST_SPACES_DESCRIPTION = `List Confluence spaces with sensible defaults. Returns TOON format by default.
+
+` + "`" + `Use this instead of` + "`" + ` ` + "`" + `conf_get /wiki/api/v2/spaces` + "`" + ` ` + "`" + `when you want:` + "`" + `
+- A list of ` + "`" + `"all spaces I have access to"` + "`" + ` (omit ` + "`" + `type` + "`" + ` for that).
+- All personal (user-owned) spaces — set ` + "`" + `type: "personal"` + "`" + `.
+- All global (site-wide) spaces — set ` + "`" + `type: "global"` + "`" + `.
+- Archived vs current — set ` + "`" + `status: "archived"` + "`" + `.
+
+` + "`" + `Defaults:` + "`" + `
+- ` + "`" + `limit` + "`" + `: 25 (max 250 per Confluence; cursor pagination for more).
+- ` + "`" + `type` + "`" + `: omitted = all types.
+- ` + "`" + `status` + "`" + `: omitted = all statuses.
+- ` + "`" + `cursor` + "`" + `: omitted = first page. Pass the ` + "`" + `cursor` + "`" + ` from a prior response to advance.
+
+` + "`" + `Output format:` + "`" + ` TOON (default) or JSON (` + "`" + `outputFormat: "json"` + "`" + `).
+
+` + "`" + `Returns:` + "`" + ` A list of space summaries — each with ` + "`" + `id, key, name, type, status, homepageId` + "`" + `. Use ` + "`" + `conf_get /wiki/api/v2/spaces/{id}` + "`" + ` to drill into one.`
+
+// CONF_LIST_PAGES_DESCRIPTION documents the conf_list_pages tool.
+const CONF_LIST_PAGES_DESCRIPTION = `List Confluence pages with filters by space, title, status, sort. Returns TOON format by default.
+
+` + "`" + `Use this instead of` + "`" + ` ` + "`" + `conf_get /wiki/api/v2/pages` + "`" + ` ` + "`" + `when you want:` + "`" + `
+- All pages in a single space — set ` + "`" + `space-id` + "`" + ` (recommended for any meaningful listing).
+- Pages whose title contains a substring — set ` + "`" + `title` + "`" + ` (case-sensitive).
+- Only current (non-archived) pages — set ` + "`" + `status: "current"` + "`" + `.
+
+` + "`" + `Resolution order:` + "`" + `
+- ` + "`" + `space-id` + "`" + ` (numeric) takes precedence over ` + "`" + `space-key` + "`" + ` if both are set.
+- ` + "`" + `space-key` + "`" + ` is also accepted (e.g. ` + "`" + `~712020103880d11e7e48bcbfd1820ce951e426` + "`" + `).
+
+` + "`" + `Defaults:` + "`" + `
+- ` + "`" + `limit` + "`" + `: 25 (max 250 per Confluence; cursor pagination for more).
+- ` + "`" + `sort` + "`" + `: omitted = id ascending. Use ` + "`" + `-modified-date` + "`" + ` for recently-edited, ` + "`" + `-created-date` + "`" + ` for newest first.
+- ` + "`" + `body-format` + "`" + `: omitted = body omitted (lightweight). Set ` + "`" + `body-format: "storage"` + "`" + ` to inline page bodies.
+
+` + "`" + `Output format:` + "`" + ` TOON (default) or JSON (` + "`" + `outputFormat: "json"` + "`" + `).
+
+` + "`" + `Returns:` + "`" + ` A list of page summaries — each with ` + "`" + `id, title, status, spaceId, parentId, version` + "`" + `. Use ` + "`" + `conf_get_page_body` + "`" + ` for the body alone.`
+
+// CONF_GET_PAGE_BODY_DESCRIPTION documents the conf_get_page_body tool.
+const CONF_GET_PAGE_BODY_DESCRIPTION = `Read a single page's body in a chosen representation. Returns TOON format by default.
+
+` + "`" + `Use this when:` + "`" + ` You have a page id (from ` + "`" + `conf_list_pages` + "`" + `, search, or given) and want its content, not its metadata.
+
+` + "`" + `Body formats:` + "`" + `
+- ` + "`" + `body-format: "storage"` + "`" + ` (default) — Confluence storage-format XHTML. Safe to feed back into PUT/PATCH bodies.
+- ` + "`" + `body-format: "view"` + "`" + ` — Rendered HTML as a user sees it after page rendering.
+- ` + "`" + `body-format: "atlas_doc_format"` + "`" + ` — Atlassian Document Format JSON.
+
+` + "`" + `Output format:` + "`" + ` TOON (default) or JSON (` + "`" + `outputFormat: "json"` + "`" + `).
+
+` + "`" + `Returns:` + "`" + ` One object with ` + "`" + `value` + "`" + `, ` + "`" + `representation` + "`" + ` fields. For ` + "`" + `storage` + "`" + ` the value is XHTML; for ` + "`" + `view` + "`" + ` it is rendered HTML; for ` + "`" + `atlas_doc_format` + "`" + ` it is a JSON object.`
+
+// CONF_SEARCH_DESCRIPTION documents the conf_search tool.
+const CONF_SEARCH_DESCRIPTION = `Search Confluence via Confluence Query Language (CQL). Returns TOON format by default.
+
+` + "`" + `Why this exists:` + "`" + ` The v1 search endpoint is the only Confluence API that accepts CQL. The v2 endpoints do not understand CQL or a portable search expression, so this tool wraps the v1 path explicitly.
+
+` + "`" + `CQL examples:` + "`" + `
+- ` + "`" + `type=page AND text~mcp-confluence` + "`" + ` — find pages mentioning ` + "`" + `mcp-confluence` + "`" + `.
+- ` + "`" + `type=page AND space.type=personal AND space.title~bennie` + "`" + ` — find a personal space by name.
+- ` + "`" + `creator=currentUser() AND type=page` + "`" + ` — pages you created.
+- ` + "`" + `lastModified >= "2026-01-01" AND type=blogpost` + "`" + ` — recent blog posts.
+
+` + "`" + `Parameters:` + "`" + `
+- ` + "`" + `cql` + "`" + `: the CQL expression. ` + "`" + `Required.` + "`" + ` Caller is responsible for any URL encoding the operator supplies; this tool does not auto-encode for you.
+- ` + "`" + `limit` + "`" + `: result cap, default 25, max 100.
+- ` + "`" + `start` + "`" + `: pagination offset. Default 0. Re-issued calls advance ` + "`" + `start` + "`" + ` by adding the previous ` + "`" + `limit` + "`" + `.
+
+` + "`" + `Returns:` + "`" + ` Object with ` + "`" + `results` + "`" + ` (each entry has ` + "`" + `title, excerpt, url, content, lastModified, entityType` + "`" + `), plus ` + "`" + `start, limit, totalSize, cqlQuery` + "`" + ` for pagination. Use ` + "`" + `conf_get /wiki/rest/api/search` + "`" + ` if you need finer control.`
+
+// CONF_HELP_DESCRIPTION documents the conf_help tool.
+// CONF_HELP_DESCRIPTION documents the conf_help self-describing
+// tool. The full tool surface map lives in the response.
+const CONF_HELP_DESCRIPTION = `Show how to use the confluence MCP server — the tool surface in one call.
+
+` + "`" + `Use this when:` + "`" + ` You have just discovered the ` + "`" + `mcp_confluence_*` + "`" + ` tool prefix and want a tour, or you are not sure which of the ten tools fits the task.
+
+` + "`" + `Response shape:` + "`" + ` Object with one entry per tool — ` + "`" + `conf_get, conf_post, conf_put, conf_patch, conf_delete, conf_list_spaces, conf_list_pages, conf_get_page_body, conf_search, conf_help` + "`" + `. For each tool:
+- ` + "`" + `description` + "`" + `: short purpose (one sentence).
+- ` + "`" + `args` + "`" + `: top-level fields with one-line descriptions.
+- ` + "`" + `example` + "`" + `: a single concrete invocation.
+
+` + "`" + `Filter by topic:` + "`" + `
+- ` + "`" + `topic: "conf_list_pages"` + "`" + ` returns just that one tool's entry.
+- ` + "`" + `topic: "all"` + "`" + ` (default) returns every tool.
+
+` + "`" + `Output format:` + "`" + ` TOON (default; preferred for human reading) or JSON.
+
+` + "`" + `Tip:` + "`" + ` Run ` + "`" + `conf_help` + "`" + ` once per session at the start of a conversation so the tool surface is loaded into context; subsequent calls inside the same conversation can stay focused.`

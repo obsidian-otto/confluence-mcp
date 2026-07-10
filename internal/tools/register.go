@@ -173,6 +173,45 @@ func RegisterAll(srv *mcp.Server, client *atlassian.Client) error {
 				return invokeTool(ctx, "conf_delete", HandleDelete, client, args)
 			},
 		},
+		// Post-v1 quality-of-life tools (added per audit 2026-07-10).
+		// Each wraps one or two HTTP calls through the standard
+		// executeRequest helper, so the 9-step TOON / JMESPath /
+		// truncation pipeline is shared with the CRUD tools.
+		{
+			name:        "conf_list_spaces",
+			description: CONF_LIST_SPACES_DESCRIPTION,
+			handler: func(ctx context.Context, args ListSpacesArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_list_spaces", HandleListSpaces, client, args)
+			},
+		},
+		{
+			name:        "conf_list_pages",
+			description: CONF_LIST_PAGES_DESCRIPTION,
+			handler: func(ctx context.Context, args ListPagesArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_list_pages", HandleListPages, client, args)
+			},
+		},
+		{
+			name:        "conf_get_page_body",
+			description: CONF_GET_PAGE_BODY_DESCRIPTION,
+			handler: func(ctx context.Context, args GetPageBodyArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_get_page_body", HandleGetPageBody, client, args)
+			},
+		},
+		{
+			name:        "conf_search",
+			description: CONF_SEARCH_DESCRIPTION,
+			handler: func(ctx context.Context, args SearchArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_search", HandleSearch, client, args)
+			},
+		},
+		{
+			name:        "conf_help",
+			description: CONF_HELP_DESCRIPTION,
+			handler: func(ctx context.Context, args HelpArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_help", HandleHelp, client, args)
+			},
+		},
 	}
 
 	for _, r := range registrations {

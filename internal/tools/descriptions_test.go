@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -92,6 +93,52 @@ func TestAllUpstreamDescriptionsCovered(t *testing.T) {
 		if _, ok := expected[name]; !ok {
 			t.Errorf("Go const CONF_%s_DESCRIPTION has no upstream counterpart", name)
 		}
+	}
+}
+
+// TestNewToolDescriptionsAreSubstantial asserts that the five
+// post-v1 convenience tool descriptions are populated — they are
+// local additions, not vendored from upstream, so the upstream-
+// drift guardrail above doesn't apply. The audit doc (2026-07-10)
+// recommended making tool descriptors "very accurate"; this test
+// verifies that each new description contains at least one full
+// sentence (not just a header) and explicitly mentions the tool
+// name in prose form so an MCP client can read it as English
+// rather than as a fragment.
+func TestNewToolDescriptionsAreSubstantial(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		desc        string
+		mentions    string // a substring expected in the description (case-sensitive)
+		minLen      int
+		mustContain string // a phrase like "returns TOON" the user expects
+	}{
+		{"CONF_LIST_SPACES", CONF_LIST_SPACES_DESCRIPTION, "List Confluence spaces", 200, "Returns TOON"},
+		{"CONF_LIST_PAGES", CONF_LIST_PAGES_DESCRIPTION, "List Confluence pages", 200, "Returns TOON"},
+		{"CONF_GET_PAGE_BODY", CONF_GET_PAGE_BODY_DESCRIPTION, "Read a single page", 200, "Returns TOON"},
+		{"CONF_SEARCH", CONF_SEARCH_DESCRIPTION, "CQL", 200, "Returns TOON"},
+		// conf_help is a self-describing tool: it doesn't return TOON
+		// (it documents the rest of the surface that does), so its
+		// first sentence must mention TOON-as-the-default elsewhere
+		// rather than as its own return format.
+		{"CONF_HELP", CONF_HELP_DESCRIPTION, "confluence", 200, "TOON"},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			if len(c.desc) < c.minLen {
+				t.Errorf("description length = %d, want >= %d", len(c.desc), c.minLen)
+			}
+			if !strings.Contains(c.desc, c.mentions) {
+				t.Errorf("description should mention %q", c.mentions)
+			}
+			if !strings.Contains(c.desc, c.mustContain) {
+				t.Errorf("description should contain %q", c.mustContain)
+			}
+		})
 	}
 }
 

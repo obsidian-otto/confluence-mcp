@@ -41,16 +41,28 @@ import (
 // server must register. The order is irrelevant to the MCP wire
 // protocol (handleListTools sorts by name before serializing) but
 // the SET membership is part of the public contract: Hermes
-// enumerates the 5 names as `mcp_confluence_conf_<verb>`, and any
+// enumerates the tool names as `mcp_confluence_<tool>`, and any
 // drift from these exact names is a bug. We assert the set, not
 // the order, so a future reorganization of the registration loop
 // does not break the test.
+//
+// Post-v1 audit (2026-07-10): the surface grew from 5 to 10 tools.
+// The five CRUD tools (conf_get / conf_post / conf_put / conf_patch
+// / conf_delete) match the upstream server byte-for-byte; the
+// five convenience tools (conf_list_spaces / conf_list_pages /
+// conf_get_page_body / conf_search / conf_help) are local
+// additions for quality-of-life and Hermes tool discovery.
 var expectedTools = []string{
 	"conf_delete",
 	"conf_get",
+	"conf_get_page_body",
+	"conf_help",
+	"conf_list_pages",
+	"conf_list_spaces",
 	"conf_patch",
 	"conf_post",
 	"conf_put",
+	"conf_search",
 }
 
 // newDeps returns a *server.ServerDeps with a real, fully-wired
@@ -108,10 +120,10 @@ func TestNew_ConstructsServer(t *testing.T) {
 	}
 }
 
-// TestNew_RegistersAllFiveTools asserts the 5 tool names are
+// TestNew_RegistersAllTenTools asserts the 10 tool names are
 // registered with the returned server. We use the mcp-golang
 // CheckToolRegistered helper — its public surface, no internals.
-func TestNew_RegistersAllFiveTools(t *testing.T) {
+func TestNew_RegistersAllTenTools(t *testing.T) {
 	srv, err := server.New(newDeps(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -124,9 +136,9 @@ func TestNew_RegistersAllFiveTools(t *testing.T) {
 	}
 }
 
-// TestNew_RegistersExactlyFiveTools asserts no extra tool is
-// registered. Today there are exactly 5; if a future phase adds a
-// 6th (e.g. a `conf_search` helper), this test will catch the
+// TestNew_RegistersExactlyTenTools asserts no extra tool is
+// registered. Today there are exactly 10; if a future phase adds an
+// 11th (e.g. a `conf_export_pdf` helper), this test will catch the
 // divergence and force the contract to be re-confirmed. We assert
 // by enumerating the registered set via the public introspection
 // helper and comparing against expectedTools. Because mcp-golang
@@ -137,7 +149,7 @@ func TestNew_RegistersAllFiveTools(t *testing.T) {
 // surprises" smoke check: each expected name is present, and a
 // small set of names that MUST NOT exist (e.g. obvious typos,
 // wrong verb casing) are absent.
-func TestNew_RegistersExactlyFiveTools(t *testing.T) {
+func TestNew_RegistersExactlyTenTools(t *testing.T) {
 	srv, err := server.New(newDeps(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -151,8 +163,7 @@ func TestNew_RegistersExactlyFiveTools(t *testing.T) {
 		"confget",     // missing separator
 		"conf_create", // wrong verb
 		"conf_update", // wrong verb
-		"conf_list",   // wrong verb
-		"conf_search", // not in v1 surface
+		"conf_list",   // wrong verb (we ship conf_list_spaces, not the bare verb)
 		"get",         // bare verb
 		"post",        // bare verb
 		"conf_space",  // resource-style name

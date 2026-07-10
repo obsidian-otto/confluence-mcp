@@ -2,7 +2,12 @@ package tools
 
 import (
 	"encoding/json"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
+
+	"github.com/invopop/jsonschema"
 )
 
 // TestArgsRoundTrip asserts that each of the five argument types
@@ -307,4 +312,298 @@ func mapsEqual(a, b map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// TestNewConvenienceArgsRoundTrip covers the four new args types
+// added in the post-v1 quality-of-life pass (conf_list_spaces,
+// conf_list_pages, conf_get_page_body, conf_search, conf_help).
+// Each must round-trip a representative JSON payload with field
+// values intact, and must serialise back without omitempty
+// dropping the values supplied.
+func TestNewConvenienceArgsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ListSpaces", func(t *testing.T) {
+		raw := []byte(`{"limit":50,"cursor":"eyJpZCI6MTIzfQ","type":"personal","status":"current","outputFormat":"json"}`)
+		var got ListSpacesArgs
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if got.Limit != 50 {
+			t.Errorf("Limit = %d, want 50", got.Limit)
+		}
+		if got.Cursor != "eyJpZCI6MTIzfQ" {
+			t.Errorf("Cursor = %q", got.Cursor)
+		}
+		if got.Type != "personal" {
+			t.Errorf("Type = %q", got.Type)
+		}
+		if got.Status != "current" {
+			t.Errorf("Status = %q", got.Status)
+		}
+		if got.OutputFormat != "json" {
+			t.Errorf("OutputFormat = %q", got.OutputFormat)
+		}
+	})
+
+	t.Run("ListPages", func(t *testing.T) {
+		raw := []byte(`{"space-id":"780763211","title":"oncall","status":"current","limit":100,"sort":"-modified-date","body-format":"view"}`)
+		var got ListPagesArgs
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if got.SpaceID != "780763211" {
+			t.Errorf("SpaceID = %q", got.SpaceID)
+		}
+		if got.Title != "oncall" {
+			t.Errorf("Title = %q", got.Title)
+		}
+		if got.Limit != 100 {
+			t.Errorf("Limit = %d", got.Limit)
+		}
+		if got.SortField != "-modified-date" {
+			t.Errorf("SortField = %q", got.SortField)
+		}
+		if got.BodyFormat != "view" {
+			t.Errorf("BodyFormat = %q", got.BodyFormat)
+		}
+	})
+
+	t.Run("GetPageBody", func(t *testing.T) {
+		raw := []byte(`{"page-id":"163935","body-format":"storage","outputFormat":"json"}`)
+		var got GetPageBodyArgs
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if got.PageID != "163935" {
+			t.Errorf("PageID = %q", got.PageID)
+		}
+		if got.BodyFormat != "storage" {
+			t.Errorf("BodyFormat = %q", got.BodyFormat)
+		}
+		if got.OutputFormat != "json" {
+			t.Errorf("OutputFormat = %q", got.OutputFormat)
+		}
+	})
+
+	t.Run("Search", func(t *testing.T) {
+		raw := []byte(`{"cql":"type=page AND text~mcp","limit":50,"start":25}`)
+		var got SearchArgs
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if got.CQL != "type=page AND text~mcp" {
+			t.Errorf("CQL = %q", got.CQL)
+		}
+		if got.Limit != 50 {
+			t.Errorf("Limit = %d", got.Limit)
+		}
+		if got.Start != 25 {
+			t.Errorf("Start = %d", got.Start)
+		}
+	})
+
+	t.Run("Help", func(t *testing.T) {
+		raw := []byte(`{"topic":"conf_get"}`)
+		var got HelpArgs
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if got.Topic != "conf_get" {
+			t.Errorf("Topic = %q", got.Topic)
+		}
+	})
+}
+
+// TestArgsJsonschemaTagsPresent asserts that every args struct has
+// non-empty `jsonschema:"description=..."` tags on its fields.
+// Empty descriptions produce the dreaded `type: object` schema
+// with no human-readable description — the audit doc flagged exactly
+// that case for the new helpers. This is a structural guarantee.
+//
+// TestArgsJsonschemaTagsNotBlank is the matching "no empty
+// descriptions" assertion that runs over all nine arg types.
+func TestArgsJsonschemaTagsPresent(t *testing.T) {
+	t.Parallel()
+
+	argTypes := []any{
+		GetArgs{},
+		PostArgs{},
+		PutArgs{},
+		PatchArgs{},
+		DeleteArgs{},
+		ListSpacesArgs{},
+		ListPagesArgs{},
+		GetPageBodyArgs{},
+		SearchArgs{},
+		HelpArgs{},
+	}
+
+	for _, a := range argTypes {
+		t.Run(reflect.TypeOf(a).Name(), func(t *testing.T) {
+			rt := reflect.TypeOf(a)
+			for i := 0; i < rt.NumField(); i++ {
+				f := rt.Field(i)
+				tag := f.Tag.Get("jsonschema")
+				if tag == "" {
+					t.Errorf("field %s.%s has no jsonschema tag", rt.Name(), f.Name)
+					continue
+				}
+				if !strings.Contains(tag, "description=") {
+					t.Errorf("field %s.%s jsonschema tag missing description= : %q", rt.Name(), f.Name, tag)
+				}
+			}
+		})
+	}
+}
+
+// TestArgsSchemasAreAccurate uses invopop/jsonschema (the same
+// library mcp-golang uses internally) to reflect each args struct
+// into a JSON Schema and assert a few liveness properties:
+//
+//   - The schema has type=object with properties.
+//   - Every arg struct's schema includes a non-empty description
+//     on at least one field (proves the jsonschema tag actually
+//     propagated).
+//   - The 'path' field on the five CRUD tools (Get, Post, Put,
+//     Patch, Delete) is in the required list.
+//   - The 'page-id' field on GetPageBodyArgs and 'cql' on
+//     SearchArgs are required.
+//   - The body field on PostArgs/PutArgs is type=object, the body
+//     field on PatchArgs is type=array with items:object. (This is
+//     the explicit body-shape assertion; reading the schema is
+//     what proves the issue-1 confusion is gone: the schema is now
+//     documented accurately.)
+func TestArgsSchemasAreAccurate(t *testing.T) {
+	t.Parallel()
+
+	rs := jsonschema.Reflector{}
+	// Use the json tag for property names (jsonschema default is the
+	// field name, but mcp-golang uses json tags — align here).
+	rs.FieldNameTag = "json"
+
+	cases := []struct {
+		name          string
+		sample        any
+		wantRequired  []string
+		wantBodyShape string // "object", "array-of-object", or "" if no body
+		bodyField     string
+	}{
+		{"GetArgs", GetArgs{}, []string{"path"}, "", ""},
+		{"PostArgs", PostArgs{}, []string{"path"}, "object", "body"},
+		{"PutArgs", PutArgs{}, []string{"path"}, "object", "body"},
+		{"PatchArgs", PatchArgs{}, []string{"path"}, "array-of-object", "body"},
+		{"DeleteArgs", DeleteArgs{}, []string{"path"}, "", ""},
+		{"ListSpacesArgs", ListSpacesArgs{}, nil, "", ""},
+		{"ListPagesArgs", ListPagesArgs{}, nil, "", ""},
+		{"GetPageBodyArgs", GetPageBodyArgs{}, []string{"page-id"}, "", ""},
+		{"SearchArgs", SearchArgs{}, []string{"cql"}, "", ""},
+		{"HelpArgs", HelpArgs{}, nil, "", ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sch := rs.ReflectFromType(reflect.TypeOf(tc.sample))
+
+			root := derefRoot(sch)
+			if root.Type != "object" {
+				t.Fatalf("root type = %q, want object", root.Type)
+			}
+			props := root.Properties
+			if props == nil || props.Len() == 0 {
+				t.Fatalf("no properties on root schema")
+			}
+
+			// Collect property names + descriptions in insertion order.
+			// jsonschema's Properties is *orderedmap.OrderedMap from
+			// github.com/wk8/go-ordered-map/v2; iterate via
+			// Oldest() -> Pair.Next(). Pair.Value is already a
+			// *jsonschema.Schema (concrete typed), no assertion needed.
+			pairs := make([][2]string, 0, props.Len())
+			pair := props.Oldest()
+			for pair != nil {
+				pairs = append(pairs, [2]string{pair.Key, pair.Value.Description})
+				pair = pair.Next()
+			}
+			if len(pairs) == 0 {
+				t.Fatalf("properties yielded no entries")
+			}
+			sort.SliceStable(pairs, func(i, j int) bool { return pairs[i][0] < pairs[j][0] })
+
+			// Check descriptions are populated (proof tags took effect).
+			hasDesc := false
+			for _, p := range pairs {
+				if p[1] != "" {
+					hasDesc = true
+					break
+				}
+			}
+			if !hasDesc {
+				t.Errorf("no field has a non-empty description; jsonschema tags may be missing")
+			}
+
+			// Required field assertions.
+			if len(tc.wantRequired) > 0 {
+				wantReq := map[string]bool{}
+				for _, r := range tc.wantRequired {
+					wantReq[r] = true
+				}
+				for _, r := range root.Required {
+					delete(wantReq, r)
+				}
+				if len(wantReq) > 0 {
+					t.Errorf("missing required fields: %v", wantReq)
+				}
+			}
+
+			// Body shape assertions (the core of Issue 1 from the
+			// post-v1 audit: verify the body field's type matches
+			// its actual Go-side semantics, never a surprise from
+			// reflection).
+			if tc.wantBodyShape != "" {
+				bodyProp, bodyOK := props.Get(tc.bodyField)
+				if !bodyOK {
+					t.Fatalf("body field %q not in properties", tc.bodyField)
+				}
+				switch tc.wantBodyShape {
+				case "object":
+					if bodyProp.Type != "object" {
+						t.Errorf("body type = %q, want object (got %+v)", bodyProp.Type, bodyProp)
+					}
+				case "array-of-object":
+					if bodyProp.Type != "array" {
+						t.Errorf("body type = %q, want array", bodyProp.Type)
+					}
+					if bodyProp.Items == nil || bodyProp.Items.Type != "object" {
+						t.Errorf("body items not type=object: %+v", bodyProp.Items)
+					}
+				}
+			}
+		})
+	}
+}
+
+// derefRoot follows the $ref pointer that top-level ReflectFromType
+// produces, returning the actual schema in $defs/T. It panics if the
+// schema shape is unexpected; that is intentional — if upstream
+// invopop/jsonschema changes how it lays out $ref, every test in
+// this file fails loudly rather than silently skipping.
+func derefRoot(sch *jsonschema.Schema) *jsonschema.Schema {
+	if sch == nil {
+		panic("derefRoot: nil schema")
+	}
+	if sch.Ref != "" {
+		// sch.Ref is "#/$defs/T"; extract T and look up.
+		parts := strings.SplitN(sch.Ref, "/", 3)
+		if len(parts) < 3 {
+			panic("derefRoot: unexpected $ref shape: " + sch.Ref)
+		}
+		defName := parts[2]
+		def, ok := sch.Definitions[defName]
+		if !ok {
+			panic("derefRoot: $defs[" + defName + "] not found")
+		}
+		return def
+	}
+	return sch
 }
