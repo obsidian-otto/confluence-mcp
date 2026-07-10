@@ -2,8 +2,6 @@ package drawio
 
 import (
 	"bytes"
-	"compress/zlib"
-	"encoding/base64"
 	"net/url"
 	"os"
 	"strings"
@@ -14,7 +12,7 @@ import (
 // with the PNG magic bytes. The drawio format requires this
 // because the file is read as a PNG by Confluence.
 func TestWrapXmlToPng_ValidPngSignature(t *testing.T) {
-	out := WrapXmlToPng([]byte(`<mxfile><diagram name="x"/></mxfile>`))
+	out := WrapXmlToPng([]byte(`<mxfile><diagram><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>`))
 	if len(out) < 8 {
 		t.Fatalf("output too short: %d bytes", len(out))
 	}
@@ -28,7 +26,7 @@ func TestWrapXmlToPng_ValidPngSignature(t *testing.T) {
 // a tEXt chunk with keyword "mxfile". This is what drawio's
 // parser looks for.
 func TestWrapXmlToPng_HasMxfileTextChunk(t *testing.T) {
-	xml := `<mxfile><diagram name="hello"/></mxfile>`
+	xml := `<mxfile><diagram name="hello"><mxGraphModel><root><mxCell id="1" value="hello"/></root></mxGraphModel></diagram></mxfile>`
 	out := WrapXmlToPng([]byte(xml))
 
 	// Scan chunks after the signature.
@@ -64,21 +62,55 @@ func TestWrapXmlToPng_HasMxfileTextChunk(t *testing.T) {
 	}
 }
 
-// TestWrapXmlToPng_RoundTripsThroughDecoder asserts the file
-// we produce can be decoded back to the original XML using the
-// same algorithm md2conf uses. The decoder here is a Go port
-// of hunyadi/md2conf/md2conf/drawio/render.py:decompress_diagram.
-func TestWrapXmlToPng_RoundTripsThroughDecoder(t *testing.T) {
-	original := `<mxfile><diagram name="round-trip"><mxGraphModel><root><mxCell id="1" value="hello"/></root></mxGraphModel></diagram></mxfile>`
-	pngBytes := WrapXmlToPng([]byte(original))
+// TestWrapXmlToPng_RoundTripsViaDrawioAlgorithm asserts the
+// tEXt chunk's URL-decoded content is a valid mxfile XML
+// containing the inner diagram content. This is what the
+// drawio app's parser does on load.
+func TestWrapXmlToPng_RoundTripsViaDrawioAlgorithm(t *testing.T) {
+	inner := `<mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1200" pageHeight="800" math="0" shadow="0"><root><mxCell id="0" /><mxCell id="1" parent="0" /></root></mxGraphModel>`
+	full := `<mxfile><diagram name="hello">` + inner + `</diagram></mxfile>`
 
-	decoded, err := decodeMxfileTextFromPng(pngBytes)
-	if err != nil {
-		t.Fatalf("decodeMxfileTextFromPng: %v", err)
+	pngBytes := WrapXmlToPng([]byte(full))
+
+	// Find the tEXt chunk.
+	pos := 8
+	var textBytes []byte
+	for pos+12 <= len(pngBytes) {
+		length := int(pngBytes[pos])<<24 | int(pngBytes[pos+1])<<16 | int(pngBytes[pos+2])<<8 | int(pngBytes[pos+3])
+		chunkType := string(pngBytes[pos+4 : pos+8])
+		dataStart := pos + 8
+		dataEnd := dataStart + length
+		data := pngBytes[dataStart:dataEnd]
+		if chunkType == "tEXt" {
+			nullIdx := bytes.IndexByte(data, 0x00)
+			if nullIdx >= 0 && string(data[:nullIdx]) == "mxfile" {
+				textBytes = data[nullIdx+1:]
+				break
+			}
+		}
+		pos = dataEnd + 4
+	}
+	if textBytes == nil {
+		t.Fatal("no mxfile tEXt chunk found")
 	}
 
-	if decoded != original {
-		t.Errorf("round-trip mismatch\n  got:  %q\n  want: %q", decoded, original)
+	// URL-decode (drawio app's first step).
+	decoded, err := url.QueryUnescape(string(textBytes))
+	if err != nil {
+		t.Fatalf("QueryUnescape: %v", err)
+	}
+
+	// Must contain the mxfile root tag.
+	if !strings.Contains(decoded, "<mxfile") {
+		t.Errorf("URL-decoded text missing <mxfile>: %s", firstN(decoded, 200))
+	}
+	// Must contain the inner diagram content.
+	if !strings.Contains(decoded, "mxGraphModel") {
+		t.Errorf("URL-decoded text missing mxGraphModel: %s", firstN(decoded, 200))
+	}
+	// Must use %20 for spaces (drawio convention).
+	if strings.Contains(string(textBytes), "+") {
+		t.Errorf("tEXt text contains '+' (should be %%20): %s", firstN(string(textBytes), 200))
 	}
 }
 
@@ -89,7 +121,6 @@ func TestWrapXmlToPng_RoundTripsThroughDecoder(t *testing.T) {
 func TestWrapXmlToPng_IHDRIsOneByOne(t *testing.T) {
 	out := WrapXmlToPng([]byte(`<mxfile/>`))
 
-	// IHDR is the first chunk after the signature.
 	pos := 8
 	if got := string(out[pos+4 : pos+8]); got != "IHDR" {
 		t.Fatalf("first chunk = %q, want IHDR", got)
@@ -101,10 +132,73 @@ func TestWrapXmlToPng_IHDRIsOneByOne(t *testing.T) {
 	}
 }
 
+// TestWrapXmlToPng_StripsOuterWrapper asserts that an input
+// with an outer <mxfile> wrapper doesn't produce nested
+// wrappers in the output.
+func TestWrapXmlToPng_StripsOuterWrapper(t *testing.T) {
+	withWrapper := `<mxfile><diagram><mxGraphModel><root><mxCell id="1"/></root></mxGraphModel></diagram></mxfile>`
+	pngBytes := WrapXmlToPng([]byte(withWrapper))
+
+	// Extract the URL-decoded tEXt text.
+	pos := 8
+	var textBytes []byte
+	for pos+12 <= len(pngBytes) {
+		length := int(pngBytes[pos])<<24 | int(pngBytes[pos+1])<<16 | int(pngBytes[pos+2])<<8 | int(pngBytes[pos+3])
+		chunkType := string(pngBytes[pos+4 : pos+8])
+		dataStart := pos + 8
+		dataEnd := dataStart + length
+		data := pngBytes[dataStart:dataEnd]
+		if chunkType == "tEXt" {
+			nullIdx := bytes.IndexByte(data, 0x00)
+			if nullIdx >= 0 && string(data[:nullIdx]) == "mxfile" {
+				textBytes = data[nullIdx+1:]
+				break
+			}
+		}
+		pos = dataEnd + 4
+	}
+	decoded, _ := url.QueryUnescape(string(textBytes))
+	// Count <mxfile> openings. Should be exactly 1.
+	if n := strings.Count(decoded, "<mxfile"); n != 1 {
+		t.Errorf("decoded text has %d <mxfile> tags, want 1 (the wrapper, not nested): %s", n, firstN(decoded, 200))
+	}
+}
+
+// TestWrapXmlToPng_AcceptsFragmentInput asserts that a
+// fragment input (just the inner content, no outer wrapper)
+// also works. The user might pass just an <mxGraphModel>
+// fragment; the tool should still produce a valid drawio PNG.
+func TestWrapXmlToPng_AcceptsFragmentInput(t *testing.T) {
+	fragment := `<mxGraphModel><root><mxCell id="1" value="hello"/></root></mxGraphModel>`
+	pngBytes := WrapXmlToPng([]byte(fragment))
+
+	pos := 8
+	var textBytes []byte
+	for pos+12 <= len(pngBytes) {
+		length := int(pngBytes[pos])<<24 | int(pngBytes[pos+1])<<16 | int(pngBytes[pos+2])<<8 | int(pngBytes[pos+3])
+		chunkType := string(pngBytes[pos+4 : pos+8])
+		dataStart := pos + 8
+		dataEnd := dataStart + length
+		data := pngBytes[dataStart:dataEnd]
+		if chunkType == "tEXt" {
+			nullIdx := bytes.IndexByte(data, 0x00)
+			if nullIdx >= 0 && string(data[:nullIdx]) == "mxfile" {
+				textBytes = data[nullIdx+1:]
+				break
+			}
+		}
+		pos = dataEnd + 4
+	}
+	decoded, _ := url.QueryUnescape(string(textBytes))
+	if !strings.Contains(decoded, "mxCell") {
+		t.Errorf("fragment input not preserved in output: %s", firstN(decoded, 200))
+	}
+}
+
 // TestWrapToPng_ReadsFromDisk asserts the disk-reading variant
 // matches the in-memory WrapXmlToPng.
 func TestWrapToPng_ReadsFromDisk(t *testing.T) {
-	xml := `<mxfile><diagram name="disk"/></mxfile>`
+	xml := `<mxfile><diagram name="disk"><mxGraphModel><root><mxCell id="1"/></root></mxGraphModel></diagram></mxfile>`
 	dir := t.TempDir()
 	path := dir + "/test.drawio"
 	if err := os.WriteFile(path, []byte(xml), 0o644); err != nil {
@@ -132,125 +226,11 @@ func TestWrapToPng_MissingFile(t *testing.T) {
 	}
 }
 
-// decodeMxfileTextFromPng is the inverse of WrapXmlToPng —
-// a Go port of md2conf's render.py decompression. Returns the
-// original XML. The fact that WrapXmlToPng + this decoder form
-// a lossless round-trip is the most important property of the
-// wrapper: any PNG we produce must be readable by md2conf and
-// by the drawio marketplace app.
-func decodeMxfileTextFromPng(pngBytes []byte) (string, error) {
-	if len(pngBytes) < 8 {
-		return "", errShortInput
+// firstN returns up to n leading bytes of s as a string. Used in
+// failure messages to keep the diff small.
+func firstN(s string, n int) string {
+	if len(s) <= n {
+		return s
 	}
-	if !bytes.Equal(pngBytes[:8], []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}) {
-		return "", errBadSignature
-	}
-
-	pos := 8
-	for pos+12 <= len(pngBytes) {
-		length := int(pngBytes[pos])<<24 | int(pngBytes[pos+1])<<16 | int(pngBytes[pos+2])<<8 | int(pngBytes[pos+3])
-		chunkType := string(pngBytes[pos+4 : pos+8])
-		dataStart := pos + 8
-		dataEnd := dataStart + length
-		if dataEnd+4 > len(pngBytes) {
-			return "", errTruncated
-		}
-		data := pngBytes[dataStart:dataEnd]
-
-		if chunkType == "tEXt" {
-			nullIdx := bytes.IndexByte(data, 0x00)
-			if nullIdx < 0 {
-				continue
-			}
-			keyword := string(data[:nullIdx])
-			if keyword != "mxfile" {
-				continue
-			}
-			text := data[nullIdx+1:]
-
-			// Inverse of urlEncoded: replace "+" back to " "
-			// (in case some encoder used QueryEscape). Then
-			// url.QueryUnescape to reverse percent-encoding.
-			textStr := strings.ReplaceAll(string(text), "+", " ")
-			unescaped, err := url.QueryUnescape(textStr)
-			if err != nil {
-				return "", err
-			}
-
-			// Inverse of raw DEFLATE compress: use flate
-			// with negative MaxBits to get raw DEFLATE
-			// decoding.
-			decoded, err := rawInflate([]byte(unescaped))
-			if err != nil {
-				return "", err
-			}
-
-			// Inverse of base64 encode.
-			xmlBytes, err := base64.StdEncoding.DecodeString(string(decoded))
-			if err != nil {
-				return "", err
-			}
-			return string(xmlBytes), nil
-		}
-
-		pos = dataEnd + 4
-	}
-	return "", errNoMxfile
+	return s[:n]
 }
-
-// rawInflate decompresses raw DEFLATE (no zlib header/trailer)
-// using compress/flate directly. Go's stdlib exposes raw DEFLATE
-// inflate via flate.NewReader with a negative io.Reader that
-// signals "no header" — the standard trick is to wrap the
-// input in a custom Reader that prepends the bytes needed.
-//
-// The simplest portable approach: use compress/flate's
-// Resetter + dictionary=""; but that requires a zlib header
-// to be present. So we wrap: prepend a minimal zlib header
-// (CMF=0x78, FLG=0x01 — no preset dictionary, default
-// compression) and append a dummy Adler-32, inflate via
-// zlib.NewReader, then drop the header and trailer from the
-// output by knowing the input length.
-//
-// Actually the cleanest approach: use compress/flate directly
-// with a negative window size via flate.NewReader. Looking at
-// the stdlib docs: compress/flate.NewReader returns a
-// io.ReadCloser that reads a raw DEFLATE stream when given
-// one. (The negative-bits trick is on the Writer side.)
-func rawInflate(data []byte) ([]byte, error) {
-	// Wrap in zlib header (2 bytes) + Adler-32 trailer (4
-	// bytes) so we can use zlib.NewReader. The Adler-32 of
-	// the empty stream is 0x00000001, but Go's zlib reader
-	// doesn't validate it strictly — passing a wrong
-	// checksum produces a checksum-mismatch error which we
-	// can ignore by using Discard.
-	wrapped := append([]byte{0x78, 0x01}, data...)
-	wrapped = append(wrapped, 0x00, 0x00, 0x00, 0x01) // dummy Adler-32
-	r, err := zlib.NewReader(bytes.NewReader(wrapped))
-	if err != nil {
-		return nil, err
-	}
-	var out bytes.Buffer
-	if _, err := out.ReadFrom(r); err != nil {
-		// zlib.Reader returns "checksum mismatch" because
-		// our dummy Adler-32 is wrong. The decompressed
-		// data is still valid — we got EOF before the
-		// trailer was consumed. Just continue.
-		if !strings.Contains(err.Error(), "checksum") {
-			return nil, err
-		}
-	}
-	return out.Bytes(), nil
-}
-
-// Sentinel errors for the decoder.
-var (
-	errShortInput   = errString("drawio: input too short for PNG signature")
-	errBadSignature = errString("drawio: missing PNG signature")
-	errTruncated    = errString("drawio: truncated chunk in PNG")
-	errNoMxfile     = errString("drawio: PNG contains no mxfile tEXt chunk")
-)
-
-type errString string
-
-func (e errString) Error() string { return string(e) }
