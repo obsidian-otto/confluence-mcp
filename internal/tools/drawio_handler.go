@@ -1,39 +1,18 @@
 // Package tools — drawio_handler.go: handler for the v3
-// `conf_upload_drawio` tool. Orchestrates the draw.io app
-// upload-AND-embed flow on Confluence Cloud, mirroring what
-// happens when a user drag-drops a `.drawio` file onto a
-// page in the web UI:
+// `conf_upload_drawio` tool. It mirrors the owning-page flow
+// produced by draw.io Diagrams for Confluence Cloud:
 //
-//  1. Upload the drawio source file (raw .drawio XML, or
-//     a pre-prepared .drawio.png / .drawio.svg) as a v1
-//     multipart attachment with the extension-derived
-//     Content-Type (application/vnd.jgraph.mxfile for
-//     .drawio).
-//  2. Create the `ac:com.mxgraph.confluence.plugins.diagramly:
-//     drawio-diagram` custom-content entity on the page
-//     whose body carries the drawio metadata JSON. The
-//     draw.io app finds the diagram via this entity.
-//  3. PUT the page body with the
-//     <ac:structured-macro ac:name="inc-drawio"> macro
-//     that references the custom-content entity by
-//     custContentId. The draw.io app's read-view renderer
-//     hooks into this macro: it loads the diagram from
-//     the custom-content entity and renders the
-//     "Edit this diagram" affordance. Without the macro,
-//     the diagram doesn't render inline even though the
-//     entity exists (verified live 2026-07-13 on the
-//     user's smartergroup.atlassian.net site: the
-//     entity appears in the drawio Diagrams list, but
-//     the page stays blank until the macro is added).
+//  1. Upload the drawio source file as an attachment with its
+//     extension-derived Content-Type.
+//  2. Create the draw.io custom-content entity that links the
+//     attachment to the page.
+//  3. PUT an owning `drawio` macro on that same page. The app
+//     recognises this macro as editable. `inc-drawio` is only
+//     for embedding a diagram owned by another page and opens
+//     the viewer when used as the owning macro.
 //
-// The inc-drawio macro envelope mirrors what the draw.io
-// app writes when the user drag-drops a .drawio file (or
-// embeds a new drawio diagram). The draw.io app's "Edit
-// this diagram" affordance triggers on this macro's
-// presence.
-//
-// All variable slots are HTML-escaped so a malicious
-// filename cannot break the page body.
+// All variable slots are HTML-escaped so a malicious filename
+// cannot break the page body.
 package tools
 
 import (
@@ -49,6 +28,7 @@ import (
 
 	"github.com/bennie/mcp-confluence/internal/atlassian"
 	"github.com/bennie/mcp-confluence/internal/jmespath"
+	"github.com/google/uuid"
 )
 
 // HandleUploadDrawio is the `conf_upload_drawio` handler. The
@@ -77,14 +57,11 @@ import (
 //     encoding: the body.value must be URL-encoded JSON
 //     (the draw.io app's body parser does
 //     decodeURIComponent(value) first, then JSON.parse).
-//  6. PUT the page body with the
-//     <ac:structured-macro ac:name="inc-drawio"> macro
-//     that references the custom-content entity by
-//     custContentId. The macro is the trigger that causes
-//     the draw.io app to render the diagram inline and
-//     offer the "Edit this diagram" affordance. Without
-//     the macro, the page stays blank even though the
-//     entity and attachment exist (verified live 2026-07-13).
+//  6. PUT the page body with the owning
+//     <ac:structured-macro ac:name="drawio"> macro. This
+//     distinguishes the page that owns the source attachment
+//     from an `inc-drawio` embed, so clicking the macro in
+//     Confluence edit mode launches the diagram editor.
 //  7. Return a small envelope {attachmentId, attachmentTitle,
 //     attachmentVersion, customContentId, customContentVersion,
 //     diagramName, page: {id, title, version}} to the caller.
@@ -207,19 +184,13 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 		return "", fmt.Errorf("conf_upload_drawio: create custom-content entity: %w (attachment %q is orphaned on page %s)", cerr, attachment.ID, pageID)
 	}
 
-	// --- Step 6: PUT the page body with the inc-drawio macro ---
+	// --- Step 6: PUT the page body with the owning drawio macro ---
 	//
-	// The draw.io app's read-view renderer hooks into the
-	// <ac:structured-macro ac:name="inc-drawio"> macro. The
-	// macro references the custom-content entity by
-	// custContentId; the draw.io app loads the diagram from
-	// the entity body and renders inline. This is the
-	// load-bearing step that makes the diagram visible
-	// (verified live 2026-07-13 on the user's site: an
-	// entity + attachment without a body macro = blank
-	// page, even though the entity is in the drawio Diagrams
-	// list).
-	storageValue := buildIncDrawioMacroXHTML(customContent, attachment, pageID, client.BaseURL)
+	// `drawio` is the macro used on the page that owns the source
+	// attachment. `inc-drawio` embeds a diagram owned by another
+	// page; it renders correctly but deliberately opens the viewer
+	// rather than the editor when clicked in Confluence edit mode.
+	storageValue := buildEditableDrawioMacroXHTML(customContent, attachment, pageID, client.BaseURL)
 
 	var finalPage *pageEnvelope
 	if initialPage != nil {
@@ -355,9 +326,9 @@ func parseAttachmentFromUploadResponse(body []byte) (*attachmentEnvelope, error)
 }
 
 // createPageWithEmptyBody creates a new page with an empty
-// storage body. The draw.io app inserts its own macros on
-// first edit, so a placeholder paragraph would just be noise.
-// Returns the new page's envelope. Caller is expected to add
+// storage body. The handler replaces it with the owning drawio
+// macro after the attachment and custom-content entity exist.
+// Returns the new page's envelope. Caller is expected to finish
 // the diagram (upload + custom-content entity) shortly after.
 func createPageWithEmptyBody(ctx context.Context, client *atlassian.Client, spaceID, title string) (*pageEnvelope, error) {
 	body := map[string]any{
@@ -516,53 +487,51 @@ func createDrawioCustomContent(ctx context.Context, client *atlassian.Client, pa
 	return &env, nil
 }
 
-// buildIncDrawioMacroXHTML composes the Confluence storage
-// XHTML for the draw.io app's "inc-drawio" macro. The macro
-// is the read-view renderer hook — the draw.io app's renderer
-// fires on this macro and loads the diagram from the
-// custom-content entity. The macro's custContentId parameter
-// points at the entity.
+// buildEditableDrawioMacroXHTML composes the owning-page macro
+// emitted by draw.io Diagrams for Confluence Cloud. Unlike
+// `inc-drawio` (an embedded viewer for a diagram owned by a
+// different page), `drawio` binds the editor to this page's
+// source attachment and custom-content entity.
 //
-// All variable slots are HTML-escaped so a malicious filename
-// cannot break the page body.
-func buildIncDrawioMacroXHTML(customContent *customContentEnvelope, attachment *attachmentEnvelope, pageID, baseURL string) string {
-	// Use stable IDs so re-running this tool against the
-	// same page doesn't accumulate duplicate macros — PUT
-	// overwrites the entire body, so the IDs stabilise the
-	// editor's diff view across runs.
-	const macroID = "drawio-mcp-confluence"
+// The UUID metadata is required by Confluence's modern editor to
+// identify the extension node. Every upload gets fresh IDs, just
+// like a macro inserted through the Confluence UI.
+func buildEditableDrawioMacroXHTML(customContent *customContentEnvelope, attachment *attachmentEnvelope, pageID, baseURL string) string {
 	escapedPageID := html.EscapeString(pageID)
 	escapedCustomContentID := html.EscapeString(customContent.ID)
 	escapedAttachmentTitle := html.EscapeString(attachment.Title)
-	escapedBase := html.EscapeString(baseURL)
+	escapedBase := html.EscapeString(strings.TrimRight(baseURL, "/") + "/wiki")
+	revision := strconv.Itoa(attachment.Version.Number)
+
 	return fmt.Sprintf(
-		`<ac:structured-macro ac:name="inc-drawio" ac:schema-version="1" data-layout="default" ac:macro-id="%s">`+
+		`<ac:structured-macro ac:name="drawio" ac:schema-version="1" data-layout="default" ac:local-id="%s" ac:macro-id="%s">`+
+			`<ac:parameter ac:name="mVer">2</ac:parameter>`+
+			`<ac:parameter ac:name="simple">0</ac:parameter>`+
+			`<ac:parameter ac:name="zoom">1</ac:parameter>`+
+			`<ac:parameter ac:name="inComment">0</ac:parameter>`+
 			`<ac:parameter ac:name="pageId">%s</ac:parameter>`+
 			`<ac:parameter ac:name="custContentId">%s</ac:parameter>`+
 			`<ac:parameter ac:name="diagramDisplayName">%s</ac:parameter>`+
+			`<ac:parameter ac:name="lbox">1</ac:parameter>`+
+			`<ac:parameter ac:name="contentVer">%s</ac:parameter>`+
 			`<ac:parameter ac:name="revision">%s</ac:parameter>`+
 			`<ac:parameter ac:name="baseUrl">%s</ac:parameter>`+
 			`<ac:parameter ac:name="diagramName">%s</ac:parameter>`+
-			`<ac:parameter ac:name="imgPageId">%s</ac:parameter>`+
-			`<ac:parameter ac:name="width">1500</ac:parameter>`+
-			`<ac:parameter ac:name="height">990</ac:parameter>`+
-			`<ac:parameter ac:name="simple">0</ac:parameter>`+
-			`<ac:parameter ac:name="zoom">1</ac:parameter>`+
-			`<ac:parameter ac:name="lbox">1</ac:parameter>`+
-			`<ac:parameter ac:name="hiResPreview">0</ac:parameter>`+
 			`<ac:parameter ac:name="pCenter">0</ac:parameter>`+
-			`<ac:parameter ac:name="links">auto</ac:parameter>`+
-			`<ac:parameter ac:name="tbstyle">top</ac:parameter>`+
-			`<ac:parameter ac:name="includedDiagram">1</ac:parameter>`+
+			`<ac:parameter ac:name="width">1500</ac:parameter>`+
+			`<ac:parameter ac:name="links" />`+
+			`<ac:parameter ac:name="tbstyle" />`+
+			`<ac:parameter ac:name="height">990</ac:parameter>`+
 			`</ac:structured-macro>`,
-		macroID,
+		uuid.NewString(),
+		uuid.NewString(),
 		escapedPageID,
 		escapedCustomContentID,
 		escapedAttachmentTitle,
-		strconv.Itoa(customContent.Version.Number),
+		revision,
+		revision,
 		escapedBase,
 		escapedAttachmentTitle,
-		escapedPageID,
 	)
 }
 

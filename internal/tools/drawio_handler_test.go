@@ -3,10 +3,9 @@
 // to test in isolation than the lower-level handlers because it
 // makes 2-3 separate HTTP calls (create page if new, upload
 // the source attachment, create the drawio custom-content
-// entity, then PUT the page body with the inc-drawio macro).
-// The page body is NEVER empty on success — the macro is the
-// load-bearing trigger that causes the draw.io app to render
-// the diagram inline.
+// entity, then PUT the page body with the owning drawio macro).
+// The page body is NEVER empty on success — the owning macro
+// both renders the diagram and gives the editor an editable node.
 package tools
 
 import (
@@ -105,11 +104,11 @@ func TestHandleUploadDrawio_MissingFile(t *testing.T) {
 
 // TestHandleUploadDrawio_ExistingPage_FullFlow asserts the
 // happy-path: an existing page gets a 3-call flow (v1 upload,
-// v2 custom-content entity, v2 PUT body with the inc-drawio
-// macro). The PUT body must contain the inc-drawio macro
-// referencing the source attachment AND the custom-content
-// entity's custContentId — this is what triggers the draw.io
-// app's diagram detection and rendering.
+// v2 custom-content entity, v2 PUT body with the owning drawio
+// macro). The PUT body must contain a drawio macro referencing
+// the source attachment and custom-content entity. An
+// inc-drawio macro is only an embedded viewer for a diagram
+// owned by another page, so using it here breaks click-to-edit.
 func TestHandleUploadDrawio_ExistingPage_FullFlow(t *testing.T) {
 	type upload struct {
 		filename    string
@@ -244,11 +243,11 @@ func TestHandleUploadDrawio_ExistingPage_FullFlow(t *testing.T) {
 		t.Errorf("drawio body.diagramName = %v, want architecture.drawio", inner["diagramName"])
 	}
 
-	// PUT body must contain the inc-drawio macro referencing
-	// both the source attachment (by diagramName) and the
-	// custom-content entity (by custContentId). This is the
-	// trigger that causes the draw.io app to render the
-	// diagram inline (verified live 2026-07-13).
+	// PUT body must contain the owning drawio macro referencing
+	// both the source attachment and custom-content entity. The
+	// draw.io app uses inc-drawio only to embed a diagram owned
+	// by a different page; it opens the viewer rather than the
+	// editor when used as the owning page's macro.
 	var putRequest map[string]any
 	if err := json.Unmarshal(putBody, &putRequest); err != nil {
 		t.Fatalf("PUT body not JSON: %v\nbody=%s", err, putBody)
@@ -261,22 +260,30 @@ func TestHandleUploadDrawio_ExistingPage_FullFlow(t *testing.T) {
 	if !ok {
 		t.Fatalf("PUT body.body.value not a string: %T", putBodyObj["value"])
 	}
+	if strings.Contains(putStorageValue, `ac:name="inc-drawio"`) {
+		t.Errorf("PUT body uses viewer-only inc-drawio macro: %s", putStorageValue)
+	}
 	for _, expected := range []string{
-		`ac:name="inc-drawio"`,
+		`ac:name="drawio"`,
+		`ac:local-id="`,
+		`ac:name="mVer">2`,
+		`ac:name="inComment">0`,
 		`ac:name="pageId">163935`,
 		`ac:name="custContentId">cc123`,
 		`ac:name="diagramDisplayName">architecture.drawio`,
 		`ac:name="diagramName">architecture.drawio`,
-		`ac:name="imgPageId">163935`,
+		`ac:name="contentVer">1`,
+		`ac:name="revision">1`,
+		`ac:name="baseUrl">` + c.BaseURL + `/wiki`,
 		`ac:name="width">1500`,
 		`ac:name="height">990`,
 		`ac:name="simple">0`,
 		`ac:name="zoom">1`,
 		`ac:name="lbox">1`,
-		`ac:name="links">auto`,
-		`ac:name="tbstyle">top`,
-		`ac:name="includedDiagram">1`,
-		`ac:macro-id="drawio-mcp-confluence"`,
+		`ac:name="pCenter">0`,
+		`ac:name="links" />`,
+		`ac:name="tbstyle" />`,
+		`ac:macro-id="`,
 	} {
 		if !strings.Contains(putStorageValue, expected) {
 			t.Errorf("PUT body storage value missing %q: %s", expected, putStorageValue)
@@ -290,7 +297,7 @@ func TestHandleUploadDrawio_ExistingPage_FullFlow(t *testing.T) {
 
 // TestHandleUploadDrawio_NewPage_FullFlow asserts the new-page
 // path: create empty page (version=1) → upload → entity
-// creation → PUT body with the inc-drawio macro. Three calls
+// creation → PUT body with the owning drawio macro. Three calls
 // to /wiki/api/v2 (POST pages, POST custom-content, PUT pages)
 // plus the v1 upload.
 func TestHandleUploadDrawio_NewPage_FullFlow(t *testing.T) {

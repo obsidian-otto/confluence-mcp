@@ -243,11 +243,8 @@ type UploadDrawioArgs struct {
 	// kept).
 	Title string `json:"title,omitempty" jsonschema:"description=Title for the new page (required when spaceId is set; ignored when pageId is set)."`
 	// DrawioFile is the path to a standalone .drawio XML file
-	// on disk. The tool wraps it into a .drawio.png using the
-	// algorithm documented in md2conf's render.py (URL-encode,
-	// raw DEFLATE, base64, embed in PNG tEXt chunk) and uploads
-	// the resulting PNG.
-	DrawioFile string `json:"drawioFile,omitempty" jsonschema:"description=Path to a standalone .drawio XML file on disk. The tool wraps it into a .drawio.png using the md2conf algorithm. Mutually exclusive with drawioPngFile and drawioSvgFile."`
+	// on disk. It is uploaded verbatim with the draw.io MIME type.
+	DrawioFile string `json:"drawioFile,omitempty" jsonschema:"description=Path to a standalone .drawio XML file on disk. Uploaded verbatim as application/vnd.jgraph.mxfile. Mutually exclusive with drawioPngFile and drawioSvgFile."`
 	// DrawioPngFile is the path to an already-prepared
 	// .drawio.png on disk. Uploaded as-is.
 	DrawioPngFile string `json:"drawioPngFile,omitempty" jsonschema:"description=Path to an already-prepared .drawio.png on disk (PNG with drawio XML embedded in a tEXt chunk with keyword 'mxfile'). Uploaded verbatim. Mutually exclusive with drawioFile and drawioSvgFile."`
