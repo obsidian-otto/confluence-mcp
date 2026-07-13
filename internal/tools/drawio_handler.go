@@ -1,29 +1,53 @@
 // Package tools — drawio_handler.go: handler for the v3
-// `conf_upload_drawio` tool. Orchestrates the two-step flow:
-// (1) upload the drawio file via the v1 multipart endpoint,
-// (2) edit the page body to add the
+// `conf_upload_drawio` tool. Orchestrates the draw.io app
+// upload-AND-embed flow on Confluence Cloud, mirroring what
+// happens when a user drag-drops a `.drawio` file onto a
+// page in the web UI:
 //
-//	<ac:structured-macro ac:name="drawio"> macro.
+//  1. Upload the drawio source file (raw .drawio XML, or
+//     a pre-prepared .drawio.png / .drawio.svg) as a v1
+//     multipart attachment with the extension-derived
+//     Content-Type (application/vnd.jgraph.mxfile for
+//     .drawio).
+//  2. Create the `ac:com.mxgraph.confluence.plugins.diagramly:
+//     drawio-diagram` custom-content entity on the page
+//     whose body carries the drawio metadata JSON. The
+//     draw.io app finds the diagram via this entity.
+//  3. PUT the page body with the
+//     <ac:structured-macro ac:name="inc-drawio"> macro
+//     that references the custom-content entity by
+//     custContentId. The draw.io app's read-view renderer
+//     hooks into this macro: it loads the diagram from
+//     the custom-content entity and renders the
+//     "Edit this diagram" affordance. Without the macro,
+//     the diagram doesn't render inline even though the
+//     entity exists (verified live 2026-07-13 on the
+//     user's smartergroup.atlassian.net site: the
+//     entity appears in the drawio Diagrams list, but
+//     the page stays blank until the macro is added).
 //
-// See specs/12-drawio-attachments/01-research-and-surface.md for
-// the full design rationale + the wire shape details. The
-// helper that wraps a .drawio XML file into a .drawio.png lives
-// in internal/drawio (not in this package) so it can be reused
-// by other call sites (e.g. a future tool that uploads multiple
-// drawio files in batch).
+// The inc-drawio macro envelope mirrors what the draw.io
+// app writes when the user drag-drops a .drawio file (or
+// embeds a new drawio diagram). The draw.io app's "Edit
+// this diagram" affordance triggers on this macro's
+// presence.
+//
+// All variable slots are HTML-escaped so a malicious
+// filename cannot break the page body.
 package tools
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/bennie/mcp-confluence/internal/atlassian"
-	"github.com/bennie/mcp-confluence/internal/drawio"
 	"github.com/bennie/mcp-confluence/internal/jmespath"
 )
 
@@ -31,34 +55,44 @@ import (
 // flow:
 //
 //  1. Validate args: exactly one of {pageId} or {spaceId+title};
-//     exactly one of {drawioFile} or {drawioPngFile}; non-empty
-//     file path; non-empty diagramName (or one derivable from
-//     the file basename).
-//  2. Read the source file from disk. If `drawioFile` was
-//     supplied, wrap the .drawio XML into a .drawio.png via
-//     internal/drawio.WrapToPng. If `drawioPngFile` was
-//     supplied, read the bytes verbatim.
-//  3. Upload the PNG bytes to the v1 attachment endpoint via
-//     atlassian.Client.UploadAttachment. This is the same path
-//     conf_upload_attachment uses; we just call the lower-level
-//     client method directly because we already have the bytes
-//     in memory (no on-disk file to hand to the existing
-//     handler).
-//  4. Build the page body XHTML containing the drawio macro
-//     envelope and either:
-//     - PUT to /wiki/api/v2/pages/{pageId} if pageId was set,
-//     OR
-//     - POST to /wiki/api/v2/pages if spaceId+title was set
-//     (create a new page with the diagram).
-//  5. Return a small envelope {attachmentId, attachmentTitle,
-//     attachmentVersion, diagramName, page: {id, title, version}}
-//     to the caller for follow-up operations.
+//     exactly one of {drawioFile}, {drawioPngFile}, or
+//     {drawioSvgFile}; non-empty file path; non-empty diagramName
+//     (or one derivable from the file basename).
+//  2. Stage the source attachment under its final drawio
+//     filename. Standalone .drawio input uploads byte-for-byte
+//     under a .drawio filename; pre-prepared .drawio.png /
+//     .drawio.svg input uploads verbatim under its existing
+//     filename. atlassian.Client.UploadAttachment sets the
+//     file part's Content-Type from the filename extension, so
+//     .drawio uploads land with application/vnd.jgraph.mxfile.
+//  3. Create the page (new-page path only) with an empty
+//     body so the draw.io app can insert its own macros on
+//     first edit.
+//  4. Upload the source attachment via the v1 multipart
+//     endpoint with X-Atlassian-Token: no-check.
+//  5. Create the `ac:com.mxgraph.confluence.plugins.diagramly:
+//     drawio-diagram` custom-content entity on the page
+//     whose body is the drawio metadata JSON. The draw.io
+//     app finds the diagram via this entity. CRITICAL
+//     encoding: the body.value must be URL-encoded JSON
+//     (the draw.io app's body parser does
+//     decodeURIComponent(value) first, then JSON.parse).
+//  6. PUT the page body with the
+//     <ac:structured-macro ac:name="inc-drawio"> macro
+//     that references the custom-content entity by
+//     custContentId. The macro is the trigger that causes
+//     the draw.io app to render the diagram inline and
+//     offer the "Edit this diagram" affordance. Without
+//     the macro, the page stays blank even though the
+//     entity and attachment exist (verified live 2026-07-13).
+//  7. Return a small envelope {attachmentId, attachmentTitle,
+//     attachmentVersion, customContentId, customContentVersion,
+//     diagramName, page: {id, title, version}} to the caller.
 //
-// On any failure after a successful upload (step 3) but before
-// a successful page edit (step 4), the attachment is orphaned
-// on the page. The caller can recover with
-// conf_delete_attachment. We surface a clear error message that
-// names the attachment id so the cleanup path is unambiguous.
+// On any failure after a successful upload (step 4) but
+// before a successful macro PUT (step 6), the attachment is
+// orphaned on the page. The caller can recover with
+// conf_delete_attachment.
 func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json.RawMessage) (string, error) {
 	var a UploadDrawioArgs
 	if err := json.Unmarshal(args, &a); err != nil {
@@ -69,14 +103,11 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 	hasPageID := a.PageId != ""
 	hasSpaceAndTitle := a.SpaceId != "" && a.Title != ""
 	if hasPageID == hasSpaceAndTitle {
-		// both true (both set) or both false (neither set) —
-		// both are errors.
 		return "", fmt.Errorf("conf_upload_drawio: provide exactly one of pageId (existing page) or spaceId+title (new page)")
 	}
 	hasDrawioFile := a.DrawioFile != ""
 	hasDrawioPngFile := a.DrawioPngFile != ""
 	hasDrawioSvgFile := a.DrawioSvgFile != ""
-	// Count how many are set — exactly one must be.
 	srcCount := 0
 	if hasDrawioFile {
 		srcCount++
@@ -91,30 +122,19 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 		return "", fmt.Errorf("conf_upload_drawio: provide exactly one of drawioFile, drawioPngFile, or drawioSvgFile (got %d)", srcCount)
 	}
 
-	// Resolve the input file path. Precedence:
-	// drawioFile > drawioPngFile > drawioSvgFile (the mutex
-	// check above already guarantees exactly one is set, so
-	// this is just the canonical order).
 	inputPath := a.DrawioFile
-	uploadExtension := "drawio.png"
 	if inputPath == "" {
 		inputPath = a.DrawioPngFile
 	}
 	if inputPath == "" {
 		inputPath = a.DrawioSvgFile
-		uploadExtension = "drawio.svg"
 	}
 
 	// Derive the diagramDisplayName from the file basename if
-	// not supplied. This becomes the `diagramName` parameter
-	// in the macro, which is what Confluence uses to find the
-	// attachment on the page.
+	// not supplied.
 	diagramName := a.DiagramDisplayName
 	if diagramName == "" {
 		base := filepath.Base(inputPath)
-		// Strip any of the drawio file extensions. The
-		// upload-filename suffix (.drawio.png or .drawio.svg)
-		// is added back below as the wire attachment name.
 		for _, ext := range []string{".drawio.svg", ".drawio.png", ".drawio", ".svg", ".png"} {
 			if strings.HasSuffix(base, ext) {
 				diagramName = base[:len(base)-len(ext)]
@@ -126,65 +146,21 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 		}
 	}
 
-	// Resolve width / height to the macro defaults.
-	width := a.Width
-	if width == 0 {
-		width = 1151
-	}
-	height := a.Height
-	if height == 0 {
-		height = 911
-	}
-
-	// --- Step 2: read source file + build PNG bytes ---
-	//
-	// Three paths:
-	//   - drawioFile: standalone .drawio XML. Wrap into .drawio.png.
-	//   - drawioPngFile: already-prepared .drawio.png. Read verbatim.
-	//   - drawioSvgFile: already-prepared .drawio.svg. Read verbatim.
-	var pngBytes []byte
-	switch {
-	case hasDrawioFile:
-		// Standalone .drawio XML — wrap into .drawio.png.
-		// The wrapped file's on-the-wire filename is
-		// "<diagramName>.drawio.png" so the drawio macro
-		// finds it under a recognizable name.
-		var err error
-		pngBytes, err = drawio.WrapToPng(inputPath)
-		if err != nil {
-			return "", fmt.Errorf("conf_upload_drawio: wrap drawio XML to PNG: %w", err)
-		}
-	default:
-		// Either .drawio.png or .drawio.svg — read verbatim.
-		// The upload-filename suffix (chosen above based on
-		// which input was set) makes the wire attachment
-		// recognizable as a drawio file regardless of
-		// extension. drawio's renderer picks it up by file
-		// content (the embedded XML), not by extension.
-		var err error
-		pngBytes, err = os.ReadFile(inputPath)
-		if err != nil {
-			return "", fmt.Errorf("conf_upload_drawio: read %q: %w", inputPath, err)
-		}
+	// --- Step 2: resolve the exact source attachment filename ---
+	uploadFilename := filepath.Base(inputPath)
+	if hasDrawioFile {
+		uploadFilename = diagramName + ".drawio"
+	} else if hasDrawioPngFile {
+		uploadFilename = diagramName + ".drawio.png"
+	} else if hasDrawioSvgFile {
+		uploadFilename = diagramName + ".drawio.svg"
 	}
 
-	// --- Step 3: upload the PNG to the target page ---
-	//
-	// We need a target pageId for the upload step. If the
-	// caller asked to create a new page (spaceId+title),
-	// we need to create the page FIRST (with a placeholder
-	// body), then upload to it. The clean order is:
-	//   a) create empty page (if new)
-	//   b) upload attachment to pageId
-	//   c) PUT page body with the drawio macro
-	//
-	// This ordering avoids the chicken-and-egg of "the page
-	// doesn't exist yet but the attachment has to live on
-	// it". The placeholder body is overwritten in step (c).
+	// --- Step 3: create the page (new-page path only) ---
 	var pageID string
 	var initialPage *pageEnvelope
 	if hasSpaceAndTitle {
-		env, err := createEmptyPage(ctx, client, a.SpaceId, a.Title)
+		env, err := createPageWithEmptyBody(ctx, client, a.SpaceId, a.Title)
 		if err != nil {
 			return "", fmt.Errorf("conf_upload_drawio: create page: %w", err)
 		}
@@ -194,59 +170,56 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 		pageID = a.PageId
 	}
 
-	// Write the PNG to a temp file so we can hand a path to
-	// atlassian.Client.UploadAttachment (which opens it via
-	// os.Open + streams via io.Copy). The temp file is
-	// removed in defer. We use the diagramName as the
-	// filename so the attachment's basename on Confluence is
-	// "<diagramName>.drawio.png" — the drawio macro's
-	// diagramName parameter then resolves to it directly.
+	// --- Step 4: stage + upload the source attachment ---
 	tmpDir, err := os.MkdirTemp("", "mcp-confluence-drawio-*")
 	if err != nil {
 		return "", fmt.Errorf("conf_upload_drawio: create temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	tmpFilePath := filepath.Join(tmpDir, diagramName+"."+uploadExtension)
-	if err := os.WriteFile(tmpFilePath, pngBytes, 0o644); err != nil {
-		return "", fmt.Errorf("conf_upload_drawio: write temp file: %w", err)
+	stagedPath := filepath.Join(tmpDir, uploadFilename)
+	if err := os.Link(inputPath, stagedPath); err != nil {
+		buf, rerr := os.ReadFile(inputPath)
+		if rerr != nil {
+			return "", fmt.Errorf("conf_upload_drawio: read %q: %w", inputPath, rerr)
+		}
+		if werr := os.WriteFile(stagedPath, buf, 0o644); werr != nil {
+			return "", fmt.Errorf("conf_upload_drawio: stage %q: %w", stagedPath, werr)
+		}
 	}
 
-	respBody, _, err := client.UploadAttachment(ctx, pageID, tmpFilePath, a.Comment, false)
+	respBody, _, err := client.UploadAttachment(ctx, pageID, stagedPath, a.Comment, false)
 	if err != nil {
-		// If we just created the page and the upload
-		// failed, clean up the orphan page so the caller
-		// isn't left with a useless empty page on their
-		// space.
 		if initialPage != nil {
-			_ = deletePage(ctx, client, pageID, initialPage.Version.Number)
+			_ = deletePage(ctx, client, pageID)
 		}
 		return "", fmt.Errorf("conf_upload_drawio: upload attachment: %w", err)
 	}
 
-	// Parse the v1 ContentPageScheme envelope to extract
-	// the created attachment's id + title + version.
 	attachment, err := parseAttachmentFromUploadResponse(respBody)
 	if err != nil {
-		// Attachment uploaded but we couldn't parse the
-		// response. The attachment IS on the page — surface
-		// a clear error with the raw body so the operator
-		// can investigate.
 		return "", fmt.Errorf("conf_upload_drawio: parse upload response: %w; raw body: %s", err, string(respBody))
 	}
 
-	// --- Step 4: edit the page body to add the macro ---
+	// --- Step 5: create the draw.io custom-content entity ---
+	customContent, cerr := createDrawioCustomContent(ctx, client, pageID, uploadFilename, attachment.Version.Number)
+	if cerr != nil {
+		return "", fmt.Errorf("conf_upload_drawio: create custom-content entity: %w (attachment %q is orphaned on page %s)", cerr, attachment.ID, pageID)
+	}
+
+	// --- Step 6: PUT the page body with the inc-drawio macro ---
 	//
-	// For an existing page: PUT with the macro body. We
-	// overwrite the body entirely (PUT is full-replacement).
-	// The caller is opting into this by invoking the tool —
-	// their original body is gone. That's the same trade-off
-	// as conf_put on a page.
-	//
-	// For a freshly-created page: PUT to set the body (the
-	// placeholder is replaced). We need the version number
-	// we got back from the create step.
-	storageValue := buildDrawioMacroXHTML(diagramName, width, height, client.BaseURL)
+	// The draw.io app's read-view renderer hooks into the
+	// <ac:structured-macro ac:name="inc-drawio"> macro. The
+	// macro references the custom-content entity by
+	// custContentId; the draw.io app loads the diagram from
+	// the entity body and renders inline. This is the
+	// load-bearing step that makes the diagram visible
+	// (verified live 2026-07-13 on the user's site: an
+	// entity + attachment without a body macro = blank
+	// page, even though the entity is in the drawio Diagrams
+	// list).
+	storageValue := buildIncDrawioMacroXHTML(customContent, attachment, pageID, client.BaseURL)
 
 	var finalPage *pageEnvelope
 	if initialPage != nil {
@@ -258,8 +231,9 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 		}
 		finalPage = updated
 	} else {
-		// Existing page: we need the current version
-		// number. Fetch it, then PUT with version+1.
+		// Existing page: fetch the current version+title
+		// so we can PUT with the correct version+1 (v2 PUT
+		// requires a non-empty title).
 		currentTitle, currentVersion, ferr := fetchPage(ctx, client, pageID)
 		if ferr != nil {
 			return "", fmt.Errorf("conf_upload_drawio: fetch current page: %w (attachment %q is on page %s but body was not updated)", ferr, attachment.ID, pageID)
@@ -271,12 +245,14 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 		finalPage = updated
 	}
 
-	// --- Step 5: build the response envelope ---
+	// --- Step 7: build the response envelope ---
 	envelope := map[string]any{
-		"attachmentId":      attachment.ID,
-		"attachmentTitle":   attachment.Title,
-		"attachmentVersion": attachment.Version.Number,
-		"diagramName":       diagramName,
+		"attachmentId":         attachment.ID,
+		"attachmentTitle":      attachment.Title,
+		"attachmentVersion":    attachment.Version.Number,
+		"customContentId":      customContent.ID,
+		"customContentVersion": customContent.Version.Number,
+		"diagramName":          uploadFilename,
 		"page": map[string]any{
 			"id":      finalPage.ID,
 			"title":   finalPage.Title,
@@ -284,7 +260,6 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 		},
 	}
 
-	// JMESPath filter.
 	data := any(envelope)
 	if a.JQ != "" {
 		filtered, ferr := jmespath.Apply(a.JQ, data)
@@ -294,13 +269,12 @@ func HandleUploadDrawio(ctx context.Context, client *atlassian.Client, args json
 		data = filtered
 	}
 
-	// Encode (TOON default; JSON when requested).
 	encoded, eerr := encodeOutput(data, a.OutputFormat)
 	if eerr != nil {
 		return "", fmt.Errorf("conf_upload_drawio: encode error: %v", eerr)
 	}
 
-	final, terr := truncateForAI(encoded, "POST", "/wiki/rest/api/content/"+pageID+"/child/attachment")
+	final, terr := truncateForAI(encoded, "PUT", "/wiki/api/v2/pages/"+pageID)
 	if terr != nil {
 		_, _ = fmt.Fprintf(stderrForDrawio(),
 			"tools: failed to persist full response: %v\n", terr)
@@ -349,6 +323,16 @@ type attachmentEnvelope struct {
 	} `json:"version"`
 }
 
+// customContentEnvelope is the minimal subset of the v2
+// custom-content envelope we care about for the drawio flow:
+// id, version.
+type customContentEnvelope struct {
+	ID      string `json:"id"`
+	Version struct {
+		Number int `json:"number"`
+	} `json:"version"`
+}
+
 // parseAttachmentFromUploadResponse pulls the first attachment
 // out of a v1 ContentPageScheme JSON envelope. Returns an
 // error if the body is not valid JSON, has no results array,
@@ -370,19 +354,19 @@ func parseAttachmentFromUploadResponse(body []byte) (*attachmentEnvelope, error)
 	return &first, nil
 }
 
-// createEmptyPage creates a page with a placeholder body
-// ("<p>(placeholder)</p>") so the upload step has a valid
-// pageId to attach to. Returns the new page's envelope. The
-// caller is expected to overwrite the body via updatePageBody
-// shortly after.
-func createEmptyPage(ctx context.Context, client *atlassian.Client, spaceID, title string) (*pageEnvelope, error) {
+// createPageWithEmptyBody creates a new page with an empty
+// storage body. The draw.io app inserts its own macros on
+// first edit, so a placeholder paragraph would just be noise.
+// Returns the new page's envelope. Caller is expected to add
+// the diagram (upload + custom-content entity) shortly after.
+func createPageWithEmptyBody(ctx context.Context, client *atlassian.Client, spaceID, title string) (*pageEnvelope, error) {
 	body := map[string]any{
 		"spaceId": spaceID,
 		"status":  "current",
 		"title":   title,
 		"body": map[string]any{
 			"representation": "storage",
-			"value":          "<p>(placeholder — body will be replaced)</p>",
+			"value":          "",
 		},
 	}
 	bodyBytes, err := json.Marshal(body)
@@ -405,21 +389,22 @@ func createEmptyPage(ctx context.Context, client *atlassian.Client, spaceID, tit
 	return &env, nil
 }
 
+// deletePage removes a page by id (used to roll back a failed
+// upload that left an orphan empty page on the user's space).
+// v2 DELETE is idempotent — no body or version required.
+func deletePage(ctx context.Context, client *atlassian.Client, pageID string) error {
+	path := "/wiki/api/v2/pages/" + pageID
+	_, err := client.Call(ctx, "DELETE", path, nil, nil)
+	return err
+}
+
 // updatePageBody PUTs a new body to /wiki/api/v2/pages/{id}
 // with the supplied storage XHTML. The caller must pass the
 // next version number (current+1 for existing pages, or the
 // create response's version+1 for newly-created pages). If
 // titleOverride is empty, the caller MUST also pass
-// currentTitle (the page's existing title) — the v2 API
-// rejects a PUT body with no title unless status=DRAFT. We
-// always emit a title in the body to keep the request simple.
-//
-// The reason for the title round-trip on existing pages:
-// the v2 PUT endpoint requires either a non-empty title or
-// a status of "draft". For our purposes we're always
-// updating a "current" page, so we have to include the
-// title. Fetching it once during the existing-page branch
-// is the cleanest way to avoid the round-trip on every call.
+// currentTitle — the v2 API rejects a PUT body with no
+// title unless status=DRAFT.
 func updatePageBody(ctx context.Context, client *atlassian.Client, pageID, storageValue, titleOverride, currentTitle string, version int) (*pageEnvelope, error) {
 	body := map[string]any{
 		"id":     pageID,
@@ -432,10 +417,6 @@ func updatePageBody(ctx context.Context, client *atlassian.Client, pageID, stora
 			"number": version,
 		},
 	}
-	// titleOverride wins when the caller explicitly sets it
-	// (new-page path); otherwise fall back to currentTitle
-	// (existing-page path). If BOTH are empty, fail loudly
-	// rather than send a malformed PUT.
 	title := titleOverride
 	if title == "" {
 		title = currentTitle
@@ -464,12 +445,7 @@ func updatePageBody(ctx context.Context, client *atlassian.Client, pageID, stora
 
 // fetchPage returns the current title and version number of an
 // existing page so the caller can compute version+1 and supply
-// the title for the PUT body. The GET is via the v2 endpoint
-// with no body-format (just metadata).
-//
-// Title is needed because the v2 PUT endpoint rejects a body
-// with an empty title unless status=DRAFT — see updatePageBody
-// below for the full rationale.
+// the title for the PUT body.
 func fetchPage(ctx context.Context, client *atlassian.Client, pageID string) (title string, version int, err error) {
 	path := "/wiki/api/v2/pages/" + pageID
 	respBody, err := client.Call(ctx, "GET", path, nil, nil)
@@ -487,50 +463,106 @@ func fetchPage(ctx context.Context, client *atlassian.Client, pageID string) (ti
 	return env.Title, env.Version.Number, nil
 }
 
-// deletePage removes a page by id (used to roll back a
-// failed upload that left an orphan empty page on the user's
-// space). The version argument is the version number we got
-// back from the create step — Confluence requires it on PUT
-// for the version-incrementing delete semantics.
+// createDrawioCustomContent creates the
+// `ac:com.mxgraph.confluence.plugins.diagramly:drawio-diagram`
+// custom-content entity on the page. The draw.io app finds
+// the diagram via this entity.
 //
-// Wait — DELETE in v2 does not require a body or version.
-// It's idempotent. So we just call it.
-func deletePage(ctx context.Context, client *atlassian.Client, pageID string, _ int) error {
-	path := "/wiki/api/v2/pages/" + pageID
-	_, err := client.Call(ctx, "DELETE", path, nil, nil)
-	return err
+// The entity body is the drawio metadata JSON the app
+// expects:
+//
+//	{"pageId": "<pageId>", "type": "page", "diagramName":
+//	 "<filename>.drawio", "version": 1, "inComment": false,
+//	 "comments": [], "isSketch": 0}
+//
+// CRITICAL encoding detail: the body.value field must be
+// URL-encoded JSON, not raw JSON. The draw.io app's body
+// parser calls `decodeURIComponent(value)` first, then
+// `JSON.parse(decoded)`. Verified live 2026-07-13 on the
+// user's site: the working arch entity has body.value =
+// "%7B%22pageId%22%3A%221829666817%22%2C..." (URL-encoded);
+// a body of raw JSON doesn't appear in the user's drawio
+// diagram list.
+func createDrawioCustomContent(ctx context.Context, client *atlassian.Client, pageID, diagramName string, attachmentVersion int) (*customContentEnvelope, error) {
+	rawJSON := fmt.Sprintf(
+		`{"pageId":%q,"type":"page","diagramName":%q,"version":%d,"inComment":false,"comments":[],"isSketch":0}`,
+		pageID, diagramName, attachmentVersion,
+	)
+	bodyValue := url.QueryEscape(rawJSON)
+	body := map[string]any{
+		"type":   "ac:com.mxgraph.confluence.plugins.diagramly:drawio-diagram",
+		"title":  diagramName,
+		"pageId": pageID,
+		"body": map[string]any{
+			"representation": "storage",
+			"value":          bodyValue,
+		},
+	}
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode custom-content body: %w", err)
+	}
+	respBody, err := client.Call(ctx, "POST", "/wiki/api/v2/custom-content", nil, bodyBytes)
+	if err != nil {
+		return nil, err
+	}
+	var env customContentEnvelope
+	if err := jsonFromMap(respBody, &env); err != nil {
+		return nil, fmt.Errorf("decode custom-content response: %w", err)
+	}
+	if env.ID == "" {
+		return nil, fmt.Errorf("custom-content response missing id")
+	}
+	return &env, nil
 }
 
-// buildDrawioMacroXHTML composes the Confluence storage XHTML
-// for a drawio diagram macro. The minimal envelope (just
-// diagramName + width + height) is enough for the macro to
-// render the diagram; if the drawio marketplace app is
-// installed, Confluence's editor will auto-fill the rich
-// parameter set (contentId, pageId, revision, baseUrl) on
-// next edit.
+// buildIncDrawioMacroXHTML composes the Confluence storage
+// XHTML for the draw.io app's "inc-drawio" macro. The macro
+// is the read-view renderer hook — the draw.io app's renderer
+// fires on this macro and loads the diagram from the
+// custom-content entity. The macro's custContentId parameter
+// points at the entity.
 //
-// The baseUrl parameter is included because drawio's renderer
-// uses it to resolve cross-page references; the Confluence
-// Cloud stock URL is https://<site>.atlassian.net/wiki.
-func buildDrawioMacroXHTML(diagramName string, width, height int, baseURL string) string {
-	// Use a stable macro-id so re-running this tool against
-	// the same page doesn't accumulate duplicate macros —
-	// PUT overwrites the entire body, so the macro-id
-	// stabilises the editor's diff view across runs.
+// All variable slots are HTML-escaped so a malicious filename
+// cannot break the page body.
+func buildIncDrawioMacroXHTML(customContent *customContentEnvelope, attachment *attachmentEnvelope, pageID, baseURL string) string {
+	// Use stable IDs so re-running this tool against the
+	// same page doesn't accumulate duplicate macros — PUT
+	// overwrites the entire body, so the IDs stabilise the
+	// editor's diff view across runs.
 	const macroID = "drawio-mcp-confluence"
+	escapedPageID := html.EscapeString(pageID)
+	escapedCustomContentID := html.EscapeString(customContent.ID)
+	escapedAttachmentTitle := html.EscapeString(attachment.Title)
+	escapedBase := html.EscapeString(baseURL)
 	return fmt.Sprintf(
-		`<ac:structured-macro ac:name="drawio" ac:schema-version="1" `+
-			`ac:macro-id="%s">`+
-			`<ac:parameter ac:name="diagramName">%s</ac:parameter>`+
-			`<ac:parameter ac:name="width">%s</ac:parameter>`+
-			`<ac:parameter ac:name="height">%s</ac:parameter>`+
+		`<ac:structured-macro ac:name="inc-drawio" ac:schema-version="1" data-layout="default" ac:macro-id="%s">`+
+			`<ac:parameter ac:name="pageId">%s</ac:parameter>`+
+			`<ac:parameter ac:name="custContentId">%s</ac:parameter>`+
+			`<ac:parameter ac:name="diagramDisplayName">%s</ac:parameter>`+
+			`<ac:parameter ac:name="revision">%s</ac:parameter>`+
 			`<ac:parameter ac:name="baseUrl">%s</ac:parameter>`+
+			`<ac:parameter ac:name="diagramName">%s</ac:parameter>`+
+			`<ac:parameter ac:name="imgPageId">%s</ac:parameter>`+
+			`<ac:parameter ac:name="width">1500</ac:parameter>`+
+			`<ac:parameter ac:name="height">990</ac:parameter>`+
+			`<ac:parameter ac:name="simple">0</ac:parameter>`+
+			`<ac:parameter ac:name="zoom">1</ac:parameter>`+
+			`<ac:parameter ac:name="lbox">1</ac:parameter>`+
+			`<ac:parameter ac:name="hiResPreview">0</ac:parameter>`+
+			`<ac:parameter ac:name="pCenter">0</ac:parameter>`+
+			`<ac:parameter ac:name="links">auto</ac:parameter>`+
+			`<ac:parameter ac:name="tbstyle">top</ac:parameter>`+
+			`<ac:parameter ac:name="includedDiagram">1</ac:parameter>`+
 			`</ac:structured-macro>`,
 		macroID,
-		diagramName,
-		strconv.Itoa(width),
-		strconv.Itoa(height),
-		baseURL,
+		escapedPageID,
+		escapedCustomContentID,
+		escapedAttachmentTitle,
+		strconv.Itoa(customContent.Version.Number),
+		escapedBase,
+		escapedAttachmentTitle,
+		escapedPageID,
 	)
 }
 
