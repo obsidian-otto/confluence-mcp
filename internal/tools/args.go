@@ -122,6 +122,30 @@ type GetPageBodyArgs struct {
 	OutputFormat string `json:"outputFormat,omitempty" jsonschema:"description=Output format. Default TOON; 'json' for plain JSON."`
 }
 
+// GetPageTreeArgs is the argument set for the `conf_get_page_tree`
+// convenience tool. It returns a page's position in its space tree:
+// the ancestor chain (root → immediate parent), direct children,
+// and the descendants subtree — three v2 endpoints in one call.
+// Local addition (the upstream has no tree-index tool); see
+// specs/13-page-tree-index/01-research-and-surface.md for why
+// Confluence has no "indexes" REST endpoint in Cloud v2.
+type GetPageTreeArgs struct {
+	// PageID identifies the page whose tree position to fetch.
+	PageID string `json:"page-id" jsonschema:"description=Numeric page id whose tree position to fetch (required). Example: '163935'."`
+	// Limit caps each sub-call's results (ancestors/children/descendants
+	// all share the same cap). 0 means "use the API default" (varying
+	// per endpoint — 25 across the board). Clamped to [1, 250] by the
+	// handler — out-of-range values fall back to the endpoint default
+	// rather than erroring.
+	Limit int `json:"limit,omitempty" jsonschema:"description=Per-subcall cap on results in each of ancestors/children/descendants. Default 25 (per v2 endpoint defaults), max 250."`
+	// Depth recurses the descendants subtree to this many levels.
+	// 0 means "use the API default" (=1, direct descendants only).
+	// Ignored for ancestors and children, which are inherently flat.
+	Depth int `json:"depth,omitempty" jsonschema:"description=For descendants only: how many levels deep to recurse. Default 1 (direct descendants only), max 10. Ignored for ancestors/children."`
+	// OutputFormat selector.
+	OutputFormat string `json:"outputFormat,omitempty" jsonschema:"description=Output format. Default TOON; 'json' for plain JSON."`
+}
+
 // SearchArgs is the argument set for the `conf_search` convenience
 // tool. It wraps /wiki/rest/api/search (v1 search) with a CQL
 // argument since CQL is the only knob Confluence's search exposes
