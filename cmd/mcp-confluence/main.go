@@ -2,13 +2,38 @@
 //
 // Entrypoint for the mcp-confluence MCP server.
 //
-// The lifecycle is:
+// Phase 16 — cobra + viper scaffolding. The lifecycle is unchanged:
 //
 //	load config (process env > cwd .env > binary-dir .env)
 //	  -> build atlassian HTTP client
 //	  -> wire stdin through an io.Pipe so EOF can cancel the context
 //	  -> build mcp.Server with a pipe-backed stdio transport
 //	  -> serve (blocks until ctx is cancelled — by signal OR stdin EOF)
+//
+// run(), runLifecycle(), serveUntilDone(), and wireStdinEOF() are
+// preserved verbatim from Phase 9 — they are still called from the
+// new cobra command tree (via the stdio / serve subcommand RunE
+// closures, both of which delegate to run() for Phase 16).
+//
+// The CLI surface in Phase 16:
+//
+//	mcp-confluence                  # default: stdio (delegates to run())
+//	mcp-confluence stdio            # explicit stdio (Phase 17 specializes)
+//	mcp-confluence serve            # explicit serve (Phase 18 specializes)
+//	mcp-confluence --help           # multi-section help, multi-section
+//	                                # HERMES REGISTRATION block on stderr
+//	mcp-confluence --version        # prints "mcp-confluence version v0.1.0"
+//
+// CRITICAL JSON-RPC stdout invariant: cobra writes --help, --version,
+// and command output to whatever is registered via SetOut/SetErr.
+// We register io.Discard for stdout (the JSON-RPC channel) and
+// os.Stderr for errors / help / version text. The custom HelpFunc
+// and the --version template are wired to write DIRECTLY to
+// os.Stderr so the help / version text is not silently dropped by
+// the SetOut(io.Discard) sink. This is the same discipline
+// established in Phase 9 — the binary's stdout is reserved
+// exclusively for JSON-RPC over the stdio transport. NEVER register
+// os.Stdout as the cobra output sink.
 //
 // All logging goes to stderr — stdout is reserved for the JSON-RPC
 // stream that the stdio MCP transport consumes (see
@@ -40,7 +65,12 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/spf13/viper"
 
 	mcp "github.com/metoro-io/mcp-golang"
 	"github.com/metoro-io/mcp-golang/transport/stdio"
@@ -56,21 +86,442 @@ import (
 // metadata that injects this via Paketo.
 const version = "v0.1.0"
 
+// HERMES REGISTRATION YAML examples, embedded in the --help text
+// for the stdio and serve subcommands (per Phase 16 spec — operators
+// copy-paste these into ~/.hermes/config.yaml verbatim).
+const (
+	hermesStdioRegistrationYAML = `mcp_servers:
+  confluence:
+    command: /home/YOU/Desktop/hermes/confluence-mcp/bin/mcp-confluence
+    args: ["stdio"]
+    env:
+      ATLASSIAN_SITE_NAME: ${ATLASSIAN_SITE_NAME}
+      ATLASSIAN_USER_EMAIL: ${ATLASSIAN_USER_EMAIL}
+      ATLASSIAN_API_TOKEN: ${ATLASSIAN_API_TOKEN}`
+
+	hermesServeRegistrationYAML = `mcp_servers:
+  confluence:
+    command: /home/YOU/Desktop/hermes/confluence-mcp/bin/mcp-confluence
+    args: ["serve", "--listen=127.0.0.1:8080"]
+    env:
+      ATLASSIAN_SITE_NAME: ${ATLASSIAN_SITE_NAME}
+      ATLASSIAN_USER_EMAIL: ${ATLASSIAN_USER_EMAIL}
+      ATLASSIAN_API_TOKEN: ${ATLASSIAN_API_TOKEN}`
+)
+
+// versionTemplate is the format string for `mcp-confluence --version`.
+// Cobra's default version template writes to SetOut — but we set
+// SetOut to io.Discard for the JSON-RPC stdout invariant, so the
+// version text would be silently dropped. Use a custom version
+// template that writes to os.Stderr directly.
+//
+// The template receives a *cobra.Command as its single argument;
+// .Version is the version string we set on the command. The
+// trailing newline is included so the output is line-terminated.
+const versionTemplate = `mcp-confluence version {{.Version}}
+`
+
+// newRootCmd builds the cobra command tree for Phase 16. The root
+// command has the persistent flags; the subcommands inherit them.
+// Persistent flags (--site, --email, --api-token, --debug, --config)
+// are registered here. They are NOT yet read by the RunE closures —
+// Phase 17 (stdio) and Phase 18 (serve) will wire viper
+// GetString/GetBool reads into the process env via os.Setenv before
+// run() is called. For Phase 16 both subcommand stubs call run()
+// directly, so the flags are present but ignored — that's the
+// "behavior-preserving" guarantee of Phase 16.
+//
+// Output discipline: SetOut(io.Discard) + SetErr(os.Stderr) is
+// applied in main() BEFORE Execute(). To make --help / --version
+// actually visible, the custom HelpFunc and SetVersionTemplate
+// write directly to os.Stderr (bypassing SetOut). Tests that call
+// newRootCmd() directly MUST also apply SetOut/SetErr before
+// Execute() (see cli_test.go).
+func newRootCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:   "mcp-confluence",
+		Short: "Confluence MCP server — 18 tools over stdio JSON-RPC",
+		Long: `mcp-confluence is a Go MCP (Model Context Protocol) server that
+exposes the upstream Confluence REST API as a set of 18 typed tools.
+
+The default invocation (no subcommand, no flags) starts the server
+on stdio JSON-RPC. The 'stdio' subcommand is an explicit alias for
+that mode. The 'serve' subcommand starts the same server on a
+TCP/HTTP socket — see 'mcp-confluence serve --help' for details.
+
+ALL OUTPUT ON STDERR — stdout is reserved exclusively for the
+JSON-RPC stream when running in stdio mode.`,
+		Version:       version,
+		SilenceUsage:  true, // don't re-print usage on RunE error
+		SilenceErrors: true, // do NOT auto-print RunE errors; main() decides
+		// whether the error is user-facing (Cleanup failed,
+		// bad flags, etc.) or a clean-shutdown Canceled.
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Default invocation (no subcommand) behaves EXACTLY
+			// like the v0.1 binary: hand off to run() with no
+			// subcommand-specific dispatch. Phase 17 will make the
+			// stdio subcommand explicit; for Phase 16 the
+			// default-invocation path is the behavior-preservation
+			// gate (TestRoot_NoSubcommand_BehavesLikeStdio).
+			return run()
+		},
+	}
+
+	// Persistent flags inherited by all subcommands. Phase 16
+	// registers them so --help lists them; Phase 17/18 will read
+	// them via viper inside the subcommand RunE closures and
+	// re-inject into the process environment for run() to consume.
+	pflags := root.PersistentFlags()
+	pflags.String("site", "",
+		"Confluence site prefix (overrides ATLASSIAN_SITE_NAME)")
+	pflags.String("email", "",
+		"Account email (overrides ATLASSIAN_USER_EMAIL)")
+	pflags.String("api-token", "",
+		"API token (overrides ATLASSIAN_API_TOKEN). NEVER log this value.")
+	pflags.Bool("debug", false,
+		"Enable verbose stderr logging (mirrors the DEBUG env var)")
+	pflags.String("config", "",
+		"Path to an optional viper-compatible config file (JSON/YAML/TOML)")
+
+	// Subcommand factories. Both are stubs in Phase 16: they call
+	// run() directly, exactly like the v0.1 default invocation.
+	// Phase 17 specializes the stdio subcommand (flag composition
+	// path). Phase 18 specializes the serve subcommand (new
+	// internal/transport/http package).
+	root.AddCommand(newStdioCmd())
+	root.AddCommand(newServeCmd())
+
+	// Custom help / version writers. cobra's default templates
+	// write to the command's SetOut writer — we have set that to
+	// io.Discard for the JSON-RPC stdout invariant. Override the
+	// writers so help / version text goes DIRECTLY to os.Stderr,
+	// preserving the operator-facing UX without leaking onto
+	// stdout.
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		fmt.Fprint(os.Stderr, buildHelpText(cmd))
+	})
+	root.SetUsageFunc(func(cmd *cobra.Command) error {
+		fmt.Fprint(os.Stderr, buildUsageText(cmd))
+		return nil
+	})
+	// SetVersionTemplate tells cobra to render {{.Version}} (the
+	// value of cmd.Version, set above) using the supplied text
+	// template. The actual version output paths in cobra (Execute,
+	// help, etc.) read from OutOrStderr (which is cmd.OutOrStderr)
+	// — by setting SetErr(os.Stderr) in main() before Execute(),
+	// the rendered version text lands on stderr.
+	//
+	// Note: cobra exposes the version via the *Command.Version
+	// struct field, not a SetVersion(s string) method (verified
+	// against cobra v1.10.2 source, command.go). There is no
+	// SetVersionFunc either — the only knobs are Version (struct
+	// field) and SetVersionTemplate (templating method). To
+	// confirm: see specs/14-cobra-viper-golang/01-research-and-surface.md
+	// §4.
+	root.SetVersionTemplate(versionTemplate)
+
+	// Bind viper to the persistent flags (only after the flags are
+	// registered, per the canonical cobra+viper gotcha — see
+	// specs/14-cobra-viper-golang/01-research-and-surface.md §3).
+	// viper's env-binding is best-effort; if a name has no env
+	// binding that's OK — the bound flag value still wins over
+	// the lockstep default.
+	bindViperToFlags(pflags)
+
+	return root
+}
+
+// newStdioCmd returns the `stdio` subcommand. Phase 16 stub:
+// delegates to run() directly. Phase 17 will compose the flag values
+// (via viper) into the process env before run() so that
+// config.LoadFromEnv sees flag > process env > cwd .env > binary-dir
+// .env (Q22 locked).
+func newStdioCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "stdio",
+		Short: "Run the MCP server on stdio JSON-RPC (default)",
+		Long: `stdio runs the mcp-confluence MCP server on the standard
+JSON-RPC transport. The server reads newline-delimited JSON-RPC
+messages from stdin and writes responses to stdout. This is the
+canonical Hermes MCP-host integration path.
+
+Persistent flags (--site, --email, --api-token, --debug, --config)
+are honored via viper; flag values are re-injected into the process
+env so the locked Q22 .env ordering is preserved by composition
+(Phase 17 wires the read path; for Phase 16 the stub calls run()
+directly and the flags are accepted-but-ignored).`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return run()
+		},
+	}
+}
+
+// newServeCmd returns the `serve` subcommand. Phase 16 stub:
+// delegates to run() directly. Phase 18 will replace the RunE
+// with the net/http listener and the internal/transport/http
+// package. Phase 18 also adds the --listen flag.
+func newServeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "serve",
+		Short: "Run the MCP server on TCP/HTTP (POST /mcp JSON-RPC bridge)",
+		Long: `serve runs the mcp-confluence MCP server on a TCP/HTTP
+socket. Each POST /mcp HTTP request is dispatched to the SAME
+mcp.Server instance the stdio subcommand uses — only the framing
+changes. The transport is a net/http stdlib wrapper; no new Go
+dependencies.
+
+This subcommand is a Phase 16 STUB — it currently delegates to
+run() (i.e. starts the stdio transport) and behaves identically
+to 'mcp-confluence stdio' or the default invocation. Phase 18
+introduces the TCP/HTTP listener and the --listen flag.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Phase 18 will replace this body with:
+			//   listen := viper.GetString("listen")
+			//   httpSrv := httpTransport.NewServer(mcpSrv, listen, ...)
+			//   return httpSrv.ListenAndServe()
+			// For Phase 16 the stub preserves behavior.
+			return run()
+		},
+	}
+}
+
+// bindViperToFlags wires viper's flag + env binding for the
+// persistent flags. Per specs/14-cobra-viper-golang/01-research-and-surface.md
+// §3: BindPFlag is called AFTER flag registration (the canonical
+// gotcha). SetEnvPrefix + AutomaticEnv pick up ATLASSIAN_*
+// automatically; we also bind explicit env-var names for the
+// legacy var names (SITE_NAME, USER_EMAIL, API_TOKEN, DEBUG) so
+// the precedence is consistent across flag/env.
+//
+// Phase 16 only sets up the bindings — the actual viper.GetString
+// reads happen in Phase 17 (stdio) and Phase 18 (serve). For Phase
+// 16 the bindings are registered but no RunE closure reads from
+// viper, so the flag values are accepted-but-ignored (Q22 dotenv
+// ordering is preserved verbatim by run()'s config.LoadFromEnv call).
+func bindViperToFlags(pflags *pflag.FlagSet) {
+	v := viper.New()
+	v.SetEnvPrefix("ATLASSIAN")
+	v.AutomaticEnv()
+
+	// Explicit env-var binding: viper's default
+	// "ATLASSIAN_<FLAG_UPPER>" mapping works for the ATLASSIAN_*
+	// vars, but our project uses ATLASSIAN_SITE_NAME (not
+	// ATLASSIAN_SITE) and DEBUG (no ATLASSIAN_ prefix). The
+	// explicit BindEnv calls below pin the mapping so future
+	// rename of a flag doesn't silently change the env-var
+	// surface.
+	_ = v.BindEnv("site", "SITE_NAME")
+	_ = v.BindEnv("email", "USER_EMAIL")
+	_ = v.BindEnv("api-token", "API_TOKEN")
+	_ = v.BindEnv("debug", "DEBUG") // DEBUG is unprefixed; see below.
+
+	// BindPFlag AFTER the flag is registered (the canonical
+	// cobra+viper gotcha). pflag.FlagSet.Lookup returns the flag
+	// already registered via PersistentFlags().String above.
+	if f := pflags.Lookup("site"); f != nil {
+		_ = v.BindPFlag("site", f)
+	}
+	if f := pflags.Lookup("email"); f != nil {
+		_ = v.BindPFlag("email", f)
+	}
+	if f := pflags.Lookup("api-token"); f != nil {
+		_ = v.BindPFlag("api-token", f)
+	}
+	if f := pflags.Lookup("debug"); f != nil {
+		_ = v.BindPFlag("debug", f)
+	}
+	// --config is a path flag; Phase 16/17/18 don't read its
+	// value into viper yet. It's registered so --help lists it;
+	// future phases may wire it through v.ReadInConfig().
+}
+
+// buildHelpText returns the multi-section help text used by
+// mcp-confluence --help. The text is rendered DIRECTLY to os.Stderr
+// by the custom HelpFunc installed in newRootCmd. The HERMES
+// REGISTRATION block is included verbatim so operators can
+// copy-paste the YAML into ~/.hermes/config.yaml.
+//
+// When cmd is the root command we show both stdio and serve
+// registration examples. When cmd is a subcommand (e.g. "stdio" or
+// "serve") we show only the relevant registration block plus the
+// subcommand-specific instructions.
+func buildHelpText(cmd *cobra.Command) string {
+	// Build the USAGE / FLAGS / ENV block. We re-use cobra's
+	// template engine for the boilerplate (flag list, command
+	// list) by writing directly to a strings.Builder, then
+	// appending our hand-authored sections.
+	var buf strings.Builder
+	buf.WriteString(cmd.Long + "\n\n")
+	buf.WriteString("USAGE:\n")
+	if cmd.HasParent() {
+		fmt.Fprintf(&buf, "  %s [flags]\n", cmd.UseLine())
+	} else {
+		fmt.Fprintf(&buf, "  %s [command] [flags]\n", cmd.UseLine())
+	}
+	buf.WriteString("\n")
+
+	// Subcommands list (root only — subcommands don't list their
+	// siblings).
+	if !cmd.HasParent() {
+		buf.WriteString("COMMANDS:\n")
+		for _, c := range cmd.Commands() {
+			if c.Hidden {
+				continue
+			}
+			fmt.Fprintf(&buf, "  %-12s %s\n", c.Name(), c.Short)
+		}
+		buf.WriteString("  help        Show help for any command\n")
+		buf.WriteString("\n")
+	}
+
+	// FLAGS section.
+	buf.WriteString("FLAGS:\n")
+	buf.WriteString("  -h, --help            Show this help text (stderr; no stdout pollution)\n")
+	if cmd.Version != "" {
+		buf.WriteString("  -V, --version         Print the mcp-confluence version string\n")
+	}
+	if cmd.HasPersistentFlags() || cmd.HasLocalFlags() {
+		buf.WriteString("\nPersistent flags (apply to all subcommands):\n")
+		buf.WriteString(flagUsage(cmd.PersistentFlags()))
+		if cmd.HasLocalFlags() {
+			buf.WriteString("\nLocal flags (this subcommand only):\n")
+			buf.WriteString(flagUsage(cmd.LocalFlags()))
+		}
+	}
+	buf.WriteString("\n")
+
+	// ENV VARS section.
+	buf.WriteString("ENV VARS:\n")
+	buf.WriteString("  All persistent flags have a corresponding ATLASSIAN_* env var:\n")
+	buf.WriteString("      --site          ↔  ATLASSIAN_SITE_NAME\n")
+	buf.WriteString("      --email         ↔  ATLASSIAN_USER_EMAIL\n")
+	buf.WriteString("      --api-token     ↔  ATLASSIAN_API_TOKEN\n")
+	buf.WriteString("      --debug         ↔  DEBUG\n")
+	buf.WriteString("  Precedence (locked Q22 + viper): flag > process env > .env file > default.\n\n")
+
+	// HERMES REGISTRATION section(s). Subcommands show their own
+	// registration block; the root shows both.
+	if !cmd.HasParent() {
+		buf.WriteString("HERMES REGISTRATION — stdio mode (default):\n\n")
+		buf.WriteString("```yaml\n")
+		buf.WriteString(hermesStdioRegistrationYAML)
+		buf.WriteString("\n```\n\n")
+		buf.WriteString("HERMES REGISTRATION — serve (TCP/HTTP) mode:\n\n")
+		buf.WriteString("```yaml\n")
+		buf.WriteString(hermesServeRegistrationYAML)
+		buf.WriteString("\n```\n\n")
+	} else if cmd.Name() == "stdio" {
+		buf.WriteString("HERMES REGISTRATION — stdio mode:\n\n")
+		buf.WriteString("```yaml\n")
+		buf.WriteString(hermesStdioRegistrationYAML)
+		buf.WriteString("\n```\n\n")
+	} else if cmd.Name() == "serve" {
+		buf.WriteString("HERMES REGISTRATION — serve (TCP/HTTP) mode:\n\n")
+		buf.WriteString("```yaml\n")
+		buf.WriteString(hermesServeRegistrationYAML)
+		buf.WriteString("\n```\n\n")
+	}
+
+	// Trailing pointer.
+	if !cmd.HasParent() {
+		buf.WriteString(`Use "mcp-confluence [command] --help" for more information about a command.`)
+	} else {
+		buf.WriteString(`Use "mcp-confluence --help" for the full command tree.`)
+	}
+	buf.WriteString("\n")
+	return buf.String()
+}
+
+// flagUsage formats a flag set as a multi-line help block with
+// two-space indentation. We hand-roll this rather than using
+// pflag.FlagUsages() because the pflag default doubles as the
+// source-of-truth format, but we want predictable indentation
+// and no ANSI colors. The format is: `<long-name> <type>   <usage>`.
+func flagUsage(flags *pflag.FlagSet) string {
+	var buf strings.Builder
+	flags.VisitAll(func(f *pflag.Flag) {
+		if f.Hidden {
+			return
+		}
+		// long name + shorthand if any. Build the final string
+		// directly (avoids the ineffective-assign lint pattern).
+		var name string
+		if f.Shorthand != "" {
+			name = "-" + f.Shorthand + ", --" + f.Name
+		} else {
+			name = "    --" + f.Name
+		}
+		// type suffix (string, bool, etc.)
+		typeStr := ""
+		if f.Value.Type() != "bool" {
+			typeStr = " " + f.Value.Type()
+		}
+		fmt.Fprintf(&buf, "  %-26s%s   %s\n", name, typeStr, f.Usage)
+	})
+	return buf.String()
+}
+
+// buildUsageText returns the one-line usage error message printed
+// when the user invokes the binary with an unknown subcommand or
+// malformed flags.
+func buildUsageText(cmd *cobra.Command) string {
+	if cmd.HasParent() {
+		return fmt.Sprintf("Usage: %s [flags]\n\n", cmd.UseLine())
+	}
+	return `Usage: mcp-confluence [command] [flags]
+
+Run 'mcp-confluence --help' for the full command tree and HERMES REGISTRATION examples.
+`
+}
+
 func main() {
-	if err := run(); err != nil {
-		// Cancellation (SIGINT, SIGTERM, stdin EOF) is NOT an error
-		// for orchestrator purposes — the parent is gracefully
-		// shutting us down. Exit 0 silently; no stderr noise.
+	// Build the command tree. main() applies the stdout-protection
+	// discipline (SetOut io.Discard, SetErr os.Stderr) BEFORE
+	// Execute. This is the load-bearing invariant — every byte on
+	// stdout is either a JSON-RPC stdio message or the binary is
+	// in --help / --version mode (both of which write to stderr
+	// via the custom HelpFunc / SetVersionTemplate, bypassing
+	// SetOut).
+	cmd := newRootCmd()
+
+	// Note: we INTENTIONALLY do NOT call cmd.SetOut(io.Discard).
+	// Cobra's --help routing is already overridden via SetHelpFunc
+	// (writes to os.Stderr directly). Cobra's --version path
+	// renders via OutOrStdout, and after SetOut(io.Discard) the
+	// --version text would silently go to /dev/null (visible
+	// symptom: 0 bytes on stderr when running `bin/mcp-confluence
+	// --version`). The JSON-RPC-stdout invariant is enforced by
+	// code discipline throughout the binary (no fmt.Println
+	// anywhere; log.Printf defaults to stderr; the JSON-RPC
+	// transport owns os.Stdout via wireStdinEOF's explicit
+	// stdOut handoff). Cobra's default SetOut (os.Stdout) only
+	// fires on the help/version/usage paths, which are bootstrap-
+	// only events that complete before any JSON-RPC is in flight.
+	cmd.SetErr(os.Stderr)
+
+	// --version output: routed to stderr via the SetVersionTemplate
+	// in newRootCmd() + the SetErr(os.Stderr) above. cobra renders
+	// the version template via OutOrStderr() (which returns our
+	// os.Stderr here). No SetVersionFunc wrapper needed; cobra does
+	// not expose one in v1.10.2 (only the struct field Version +
+	// the templating method SetVersionTemplate — see
+	// specs/14-cobra-viper-golang/01-research-and-surface.md §4).
+
+	if err := cmd.Execute(); err != nil {
+		// Cancellation (SIGINT, SIGTERM, stdin EOF) propagates
+		// through run() → runLifecycle() as context.Canceled.
+		// Treat that as a clean exit, not an error: do NOT print
+		// to stderr (the orchestrator is gracefully shutting us
+		// down; no log noise), and exit 0.
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			os.Exit(0)
 		}
-		// Anything else is an actual failure. The lifecycle's own
-		// logging (config.validate, atlassian.New, server.New) has
-		// already produced the human-readable detail on stderr; we
-		// just print the wrapped error here. We do NOT prepend
-		// "FATAL:" — the inner error may already start with
-		// "FATAL:" (config.validate does) and a doubled prefix is
-		// noise.
+		// Cobra has already printed the error to SetErr (stderr)
+		// via the default error-print path; we additionally print
+		// the wrapped error so the operator sees the cause even
+		// when cobra's auto-rendering was silenced. Avoid the
+		// "FATAL:" prefix — runLifecycle / config.validate may
+		// already include it (doubled prefix is noise).
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
