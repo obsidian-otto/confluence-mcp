@@ -68,6 +68,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -699,16 +700,47 @@ func buildHelpText(cmd *cobra.Command) string {
 	buf.WriteString("\n")
 
 	// Subcommands list (root only — subcommands don't list their
-	// siblings).
+	// siblings). The padding width is computed from the longest
+	// subcommand name so descriptions never bleed into the name
+	// column. Two spaces of separator after the name. Lines are
+	// sorted alphabetically by subcommand name so the operator
+	// can scan to a known prefix (get, list, post, put, upload).
+	// Hidden subcommands are skipped (cobra's "help" is hidden
+	// because we register our own `help` subcommand for the
+	// conf_help MCP tool — the duplicate would otherwise appear).
 	if !cmd.HasParent() {
-		buf.WriteString("COMMANDS:\n")
+		visible := make([]*cobra.Command, 0, len(cmd.Commands()))
+		maxName := 0
 		for _, c := range cmd.Commands() {
 			if c.Hidden {
 				continue
 			}
-			fmt.Fprintf(&buf, "  %-12s %s\n", c.Name(), c.Short)
+			// De-duplicate the "help" subcommand. Cobra registers
+			// its own built-in help when Execute() runs; we also
+			// register `help` (from newHelpCmd → conf_help MCP
+			// tool). Mark the cobra auto-help as Hidden on the
+			// fly here — doing it in newRootCmd() is too early
+			// (cobra hasn't added the auto-help yet).
+			if c.Name() == "help" && c.Short == "Help about any command" {
+				c.Hidden = true
+				continue
+			}
+			visible = append(visible, c)
+			if n := len(c.Name()); n > maxName {
+				maxName = n
+			}
 		}
-		buf.WriteString("  help        Show help for any command\n")
+		sort.Slice(visible, func(i, j int) bool { return visible[i].Name() < visible[j].Name() })
+		// Pad to maxName+2 minimum, with a floor of 12 so very
+		// short command sets still look reasonable.
+		pad := maxName + 2
+		if pad < 12 {
+			pad = 12
+		}
+		buf.WriteString("COMMANDS:\n")
+		for _, c := range visible {
+			fmt.Fprintf(&buf, "  %-*s  %s\n", pad, c.Name(), c.Short)
+		}
 		buf.WriteString("\n")
 	}
 

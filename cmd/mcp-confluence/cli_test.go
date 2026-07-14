@@ -1423,3 +1423,121 @@ func TestGet_EndToEndLiveInvocation(t *testing.T) {
 		t.Errorf("list_spaces live output missing %q:\n%s", "results[", stdout.String())
 	}
 }
+
+// TestRootHelp_CommandsBlockAligned locks the COMMANDS-block
+// formatting in the root --help output. Two regressions this
+// test guards against:
+//
+//  1. Name column too narrow — previously hard-coded to 12
+//     chars, so subcommands like `upload_attachment` (17 chars)
+//     bled into the description column. The fix computes the
+//     padding width from the longest visible subcommand name
+//     and adds 2 spaces of separator.
+//  2. Duplicate `help` entry — cobra auto-registers a built-in
+//     `help` subcommand AND we register our own `help` (from
+//     conf_help MCP tool). The dedup filter in buildHelpText
+//     hides the auto-help, leaving exactly one `help` line.
+//
+// The test scans the COMMANDS block lines and asserts that
+// every line has the same column position where the description
+// starts (i.e. the two-space separator is uniform).
+func TestRootHelp_CommandsBlockAligned(t *testing.T) {
+	t.Parallel()
+	bin := binaryPath(t)
+	cmd := exec.Command(bin, "--help")
+	cmd.Stdin = strings.NewReader("")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("--help exited non-zero: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("--help wrote %d bytes to stdout (must be 0)", stdout.Len())
+	}
+
+	// Extract the COMMANDS block (between the "COMMANDS:" header
+	// and the next blank line or "FLAGS:" section).
+	s := stderr.String()
+	start := strings.Index(s, "COMMANDS:\n")
+	if start < 0 {
+		t.Fatalf("--help output missing COMMANDS block:\n%s", s)
+	}
+	tail := s[start+len("COMMANDS:\n"):]
+	end := strings.Index(tail, "\n\n")
+	if end < 0 {
+		end = len(tail)
+	}
+	block := tail[:end]
+
+	// Find the description column position from any line that
+	// has the "  name  description" shape (two leading spaces,
+	// then a name, then ≥2 spaces of padding+separator, then
+	// description). The description's first char is the first
+	// non-space char after the leading indent that follows a
+	// gap of ≥2 spaces. The first such line sets the expected
+	// column for all others.
+	const leadingIndent = "  "
+	var expectedDescCol = -1
+	helpCount := 0
+	for _, line := range strings.Split(block, "\n") {
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, leadingIndent) {
+			t.Errorf("COMMANDS line missing 2-space indent: %q", line)
+			continue
+		}
+		// Find the description column: scan for " " (single)
+		// or "  " (double) or longer runs of spaces; the
+		// description starts at the first non-space char after
+		// the longest run. Equivalently: split on whitespace
+		// runs — the last token is the description's leading
+		// word, and the position just before it is where the
+		// description column starts.
+		//
+		// Implementation: find the first non-space char after
+		// the name token. The name is a single contiguous run
+		// of non-space chars starting at the leading indent.
+		// Everything between the name and the next non-space
+		// char is the padding+separator zone (always ≥2
+		// spaces). The description column is the position of
+		// that next non-space char.
+		after := line[len(leadingIndent):]
+		// Skip the name token.
+		i := 0
+		for i < len(after) && after[i] != ' ' {
+			i++
+		}
+		if i == 0 {
+			t.Errorf("COMMANDS line has no subcommand name: %q", line)
+			continue
+		}
+		name := after[:i]
+		// Skip the padding+separator zone (≥2 spaces).
+		for i < len(after) && after[i] == ' ' {
+			i++
+		}
+		// Verify the gap was ≥2 (the buildHelpText format
+		// guarantees this — pad = maxName+2 and len(name) ≤
+		// maxName so the gap is pad - len(name) + 2 = maxName
+		// - len(name) + 4, always ≥4).
+		// (We don't assert a hard count because the gap varies
+		// per name; we just trust the format.)
+		descCol := len(leadingIndent) + i
+		if expectedDescCol < 0 {
+			expectedDescCol = descCol
+		} else if descCol != expectedDescCol {
+			t.Errorf("COMMANDS line description starts at col %d, expected col %d: %q\nfull block:\n%s",
+				descCol, expectedDescCol, line, block)
+		}
+		if name == "help" {
+			helpCount++
+		}
+	}
+
+	// Lock the dedup behavior: only one `help` line in COMMANDS.
+	if helpCount != 1 {
+		t.Errorf("COMMANDS block has %d `help` lines, expected 1 (cobra auto-help is hidden when our conf_help subcommand is registered)", helpCount)
+	}
+}
