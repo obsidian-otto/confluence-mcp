@@ -7,45 +7,45 @@
 //
 // Design contract (do not change without a spec):
 //
-//   1. The 18 MCP tool handlers in internal/tools all share the
-//      same signature:
+//  1. The 18 MCP tool handlers in internal/tools all share the
+//     same signature:
 //
-//          func HandleXxx(ctx context.Context, client *atlassian.Client,
-//                         args json.RawMessage) (string, error)
+//     func HandleXxx(ctx context.Context, client *atlassian.Client,
+//     args json.RawMessage) (string, error)
 //
-//   2. Their args structs (e.g. GetArgs, PostArgs) carry
-//      `jsonschema:"description=...,required"` tags that the
-//      metoro-io/mcp-golang framework reads at registration
-//      time. We RE-USE the same tags here, via reflection, to
-//      build cobra flag bindings — so a schema change in
-//      internal/tools/args.go automatically flows into the CLI
-//      help text with no manual duplication.
+//  2. Their args structs (e.g. GetArgs, PostArgs) carry
+//     `jsonschema:"description=...,required"` tags that the
+//     metoro-io/mcp-golang framework reads at registration
+//     time. We RE-USE the same tags here, via reflection, to
+//     build cobra flag bindings — so a schema change in
+//     internal/tools/args.go automatically flows into the CLI
+//     help text with no manual duplication.
 //
-//   3. The CLI dispatch is the ONE legitimate stdout writer in
-//      this binary. The stdio / HTTP transports reserve stdout
-//      for the JSON-RPC wire; the CLI transport (i.e. the user
-//      typing `mcp-confluence conf_get --path=...` in a shell)
-//      is the legitimate use case for writing tool results to
-//      stdout. See runToolInvocation below — that is the ONLY
-//      place in the package that calls fmt.Println.
+//  3. The CLI dispatch is the ONE legitimate stdout writer in
+//     this binary. The stdio / HTTP transports reserve stdout
+//     for the JSON-RPC wire; the CLI transport (i.e. the user
+//     typing `mcp-confluence conf_get --path=...` in a shell)
+//     is the legitimate use case for writing tool results to
+//     stdout. See runToolInvocation below — that is the ONLY
+//     place in the package that calls fmt.Println.
 //
-//   4. Persistent flags (--site, --email, --api-token) are
-//      already inherited from the root command and pushed into
-//      the process env by composeFlagsIntoEnv() (defined in
-//      main.go). After that runs, config.LoadFromEnv() and
-//      atlassian.New(cfg) produce the same client the stdio
-//      and serve subcommands use, so the three transports share
-//      identical credential resolution semantics.
+//  4. Persistent flags (--site, --email, --api-token) are
+//     already inherited from the root command and pushed into
+//     the process env by composeFlagsIntoEnv() (defined in
+//     main.go). After that runs, config.LoadFromEnv() and
+//     atlassian.New(cfg) produce the same client the stdio
+//     and serve subcommands use, so the three transports share
+//     identical credential resolution semantics.
 //
-//   5. The toolHandlers map below wires the 5 CRUD entries for
-//      Phase 20. Phase 21 adds the remaining 13 entries
-//      (list_spaces, list_pages, get_page_body, get_page_tree,
-//      search, help, post_markdown, put_markdown,
-//      get_page_markdown, upload_attachment, list_attachments,
-//      delete_attachment, upload_drawio). The subcommand
-//      factories in cli_tool_crud.go look up the handler from
-//      this map by name — the dispatch is data-driven, not
-//      hand-wired.
+//  5. The toolHandlers map below wires the 5 CRUD entries for
+//     Phase 20. Phase 21 adds the remaining 13 entries
+//     (list_spaces, list_pages, get_page_body, get_page_tree,
+//     search, help, post_markdown, put_markdown,
+//     get_page_markdown, upload_attachment, list_attachments,
+//     delete_attachment, upload_drawio). The subcommand
+//     factories in cli_tool_crud.go look up the handler from
+//     this map by name — the dispatch is data-driven, not
+//     hand-wired.
 package main
 
 import (
@@ -66,21 +66,46 @@ import (
 )
 
 // toolHandlers maps each MCP tool name to its Handle* function.
-// Phase 20 wires the 5 CRUD entries; Phase 21 adds the other 13.
-// The map is the single source of truth for the CLI dispatch
-// surface — the subcommand factories in cli_tool_crud.go use it
-// when constructing their RunE closures.
+// Phase 20 wired the 5 CRUD entries; Phase 21 added the other 13
+// (list_spaces, list_pages, get_page_body, get_page_tree, search,
+// help, post_markdown, put_markdown, get_page_markdown,
+// upload_attachment, list_attachments, delete_attachment,
+// upload_drawio). Together the 18 entries cover the full MCP
+// tool surface — every tool the stdio / HTTP transports expose
+// also has a CLI dispatch entry. The subcommand factories in
+// cli_tool_crud.go / cli_tool_convenience.go / cli_tool_markdown.go
+// / cli_tool_attachments.go / cli_tool_drawio.go look up the
+// handler from this map by name — the dispatch is data-driven,
+// not hand-wired.
 //
 // Type identity note: every Handle* function shares the same
 // shape `func(context.Context, *atlassian.Client, json.RawMessage)
 // (string, error)`, so a single function type is sufficient and
 // the map values are interchangeable.
 var toolHandlers = map[string]func(context.Context, *atlassian.Client, json.RawMessage) (string, error){
+	// Phase 20 — 5 CRUD (raw REST pass-through)
 	"conf_get":    internal.HandleGet,
 	"conf_post":   internal.HandlePost,
 	"conf_put":    internal.HandlePut,
 	"conf_patch":  internal.HandlePatch,
 	"conf_delete": internal.HandleDelete,
+	// Phase 21 — 6 convenience (typed wrappers over /wiki/api/v2/*)
+	"conf_list_spaces":   internal.HandleListSpaces,
+	"conf_list_pages":    internal.HandleListPages,
+	"conf_get_page_body": internal.HandleGetPageBody,
+	"conf_get_page_tree": internal.HandleGetPageTree,
+	"conf_search":        internal.HandleSearch,
+	"conf_help":          internal.HandleHelp,
+	// Phase 21 — 3 markdown (round-trip conf_post/put via internal/markdown)
+	"conf_post_markdown":     internal.HandlePostMarkdown,
+	"conf_put_markdown":      internal.HandlePutMarkdown,
+	"conf_get_page_markdown": internal.HandleGetPageMarkdown,
+	// Phase 21 — 3 attachments (v1 upload + v2 list/delete)
+	"conf_upload_attachment": internal.HandleUploadAttachment,
+	"conf_list_attachments":  internal.HandleListAttachments,
+	"conf_delete_attachment": internal.HandleDeleteAttachment,
+	// Phase 21 — 1 drawio (upload + embed in one call)
+	"conf_upload_drawio": internal.HandleUploadDrawio,
 }
 
 // toolHandler returns the Handle* function for the given tool
@@ -305,10 +330,7 @@ func registerFlagsForType(pf *pflag.FlagSet, t reflect.Type) error {
 // an empty string / nil map / false bool / 0 int is omitted
 // from the payload unless the field is required.
 func readFlagsFromArgsStruct(cmd *cobra.Command, argsStruct any) (json.RawMessage, error) {
-	t := reflect.TypeOf(argsStruct)
-	if t.Kind() == reflect.Ptr {
-		t = t.Elem()
-	}
+	t := reflect.TypeOf(argsStruct).Elem()
 	if t.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("readFlagsFromArgsStruct: expected pointer to struct, got %T", argsStruct)
 	}
@@ -458,8 +480,17 @@ func runToolInvocation(
 	handleFn func(ctx context.Context, client *atlassian.Client, args json.RawMessage) (string, error),
 	argsStruct any,
 ) error {
+	// Resolve the handler. The per-tool subcommand factories pass
+	// it explicitly via the closure; this fallback exists so the
+	// map at the top of this file (and the toolHandler helper)
+	// stay referenced — they're the canonical registry of all 18
+	// tools, and a future change to add a "tools list" root
+	// subcommand would read from toolHandlers directly.
 	if handleFn == nil {
-		return fmt.Errorf("runToolInvocation: handleFn is nil (programmer error in subcommand factory)")
+		handleFn = toolHandler(cmd.Name())
+		if handleFn == nil {
+			return fmt.Errorf("runToolInvocation: no handler for tool %q (programmer error in subcommand factory)", cmd.Name())
+		}
 	}
 	if argsStruct == nil {
 		return fmt.Errorf("runToolInvocation: argsStruct is nil (programmer error in subcommand factory)")

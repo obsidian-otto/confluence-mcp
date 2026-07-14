@@ -199,23 +199,39 @@ JSON-RPC stream when running in stdio mode.`,
 	// Phase 17 specialized the stdio path. Phase 18 added the
 	// serve / HTTP transport.
 	//
-	// v5 Phase 20 — per-tool CLI subcommands. Each maps 1:1 to
-	// a registered MCP tool handler. CLI invocation produces the
-	// same result string the stdio / HTTP transports emit (the
-	// CLI dispatch is the ONE legitimate stdout writer in the
-	// binary — see cli_tool_dispatch.go for the full rationale).
-	// Phase 21 will add the remaining 13 subcommands
-	// (list_spaces, list_pages, get_page_body, get_page_tree,
-	// search, help, post_markdown, put_markdown, get_page_markdown,
-	// upload_attachment, list_attachments, delete_attachment,
-	// upload_drawio).
+	// v5 Phase 21 — full per-tool CLI subcommand surface.
+	// Every registered MCP tool (18 total) is now exposed as a
+	// first-class cobra subcommand. CLI invocation produces
+	// the same result string the stdio / HTTP transports emit
+	// (the CLI dispatch is the ONE legitimate stdout writer
+	// in the binary — see cli_tool_dispatch.go for the full
+	// rationale). Total: 18 conf_* + stdio + serve = 20
+	// subcommands + the 2 system flags (--help, --version).
 	root.AddCommand(newStdioCmd())
 	root.AddCommand(newServeCmd())
+	// 5 CRUD (Phase 20)
 	root.AddCommand(newConfGetCmd())
 	root.AddCommand(newConfPostCmd())
 	root.AddCommand(newConfPutCmd())
 	root.AddCommand(newConfPatchCmd())
 	root.AddCommand(newConfDeleteCmd())
+	// 6 convenience (Phase 21) — typed wrappers over /wiki/api/v2/*
+	root.AddCommand(newConfListSpacesCmd())
+	root.AddCommand(newConfListPagesCmd())
+	root.AddCommand(newConfGetPageBodyCmd())
+	root.AddCommand(newConfGetPageTreeCmd())
+	root.AddCommand(newConfSearchCmd())
+	root.AddCommand(newConfHelpCmd())
+	// 3 markdown (Phase 21) — round-trip via internal/markdown
+	root.AddCommand(newConfPostMarkdownCmd())
+	root.AddCommand(newConfPutMarkdownCmd())
+	root.AddCommand(newConfGetPageMarkdownCmd())
+	// 3 attachments (Phase 21) — v1 upload + v2 list/delete
+	root.AddCommand(newConfUploadAttachmentCmd())
+	root.AddCommand(newConfListAttachmentsCmd())
+	root.AddCommand(newConfDeleteAttachmentCmd())
+	// 1 drawio (Phase 21) — upload + embed in one call
+	root.AddCommand(newConfUploadDrawioCmd())
 
 	// Custom help / version writers. cobra's default templates
 	// write to the command's SetOut writer — we have set that to

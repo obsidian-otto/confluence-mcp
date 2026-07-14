@@ -16,14 +16,14 @@
 //
 //  3. Wires RunE to runToolInvocation (from
 //     cli_tool_dispatch.go), which:
-//      - composes the persistent flags (--site/--email/--api-token)
-//        into the process env (Q22 ordering);
-//      - loads config + builds an atlassian.Client;
-//      - reads the bound flags back into the args struct and
-//        marshals to json.RawMessage;
-//      - invokes the locked internal.Handle* function;
-//      - prints the returned string to stdout (the ONE
-//        legitimate stdout write in the binary).
+//     - composes the persistent flags (--site/--email/--api-token)
+//     into the process env (Q22 ordering);
+//     - loads config + builds an atlassian.Client;
+//     - reads the bound flags back into the args struct and
+//     marshals to json.RawMessage;
+//     - invokes the locked internal.Handle* function;
+//     - prints the returned string to stdout (the ONE
+//     legitimate stdout write in the binary).
 //
 // The 5 subcommands share the same RunE body; the per-command
 // variation is just the args struct type and the Handle*
