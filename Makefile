@@ -1,21 +1,32 @@
 # =============================================================================
 # mcp-confluence Makefile — Single Source of Truth
 # =============================================================================
-# Quick start:
-#   make help           # show every command
-#   make verify-tools   # confirm go, pack, docker are installed
-#   make install        # go mod download
-#   make build          # compile to ./bin/mcp-confluence
-#   make test           # run all tests
-#   make check          # lint + test (pre-commit gate)
-#   make image          # build OCI image via pack + Paketo Go BuildPak
+# The Makefile is the single source of truth for every command in this
+# project (per the `project` skill and the user's locked Q14 decision).
+# Never run `go build`, `go test`, `pack build`, or `docker build`
+# directly — always go through these targets.
 #
-# Settings are loaded from (in priority order):
+# Quick start:
+#   make help            # show every command
+#   make verify-tools    # confirm go, pack, docker are installed
+#   make install         # go mod download
+#   make build           # compile to ./bin/mcp-confluence (CGO_ENABLED=0)
+#   make test            # run all 156 tests (no cache, no race)
+#   make check           # lint + test (pre-commit gate)
+#   make image           # build OCI image via pack + Paketo Go BuildPak
+#   make docker-build    # plain-docker fallback when pack is unavailable
+#
+# Settings are loaded from (in priority order — per locked Q22):
 #   1. process environment
 #   2. .env in the current working directory
 #   3. .env next to the binary
-# See ../confluence/specs/confluence-go-mcp/01-foundations/03-env-var-contract.md
-# for the full contract.
+# See specs/01-foundations/03-env-var-contract.md for the full contract.
+#
+# Project status (2026-07-13):
+#   - Implementation: complete (Phases 0-15, IMPLEMENTATION_PLAN.md)
+#   - 17 MCP tools registered (5 CRUD + 5 convenience + 3 markdown +
+#                              3 attachments + 1 drawio orchestrator)
+#   - ~14,000 lines of Go across 10 internal packages + cmd/mcp-confluence
 # =============================================================================
 
 # -----------------------------------------------------------------------
@@ -52,8 +63,8 @@ RESET  := \033[0m
 # -----------------------------------------------------------------------
 # .PHONY — every target declared below is phony
 # -----------------------------------------------------------------------
-.PHONY: help install clean build test lint format check type-check security \
-        run dev image image-push image-inspect docker-build sbom \
+.PHONY: help install clean build test test-update lint format check type-check \
+        security run dev image image-push image-inspect docker-build sbom \
         verify-env verify-tools \
         info locate-bin \
         all
@@ -126,9 +137,14 @@ build: ## Build the binary to ./bin/$(BINARY_NAME) (statically linked for distro
 # -----------------------------------------------------------------------
 # Test
 # -----------------------------------------------------------------------
-test: ## Run all tests
+test: ## Run all tests (no cache; honours the `update` build tag for golden-file regeneration)
 	@printf "$(BLUE)Running tests...$(RESET)\n"
-	$(GO) test ./...
+	CGO_ENABLED=0 $(GO) test -count=1 ./...
+
+test-update: ## Regenerate golden-file fixtures under internal/markdown/testdata (DESTRUCTIVE)
+	@printf "$(YELLOW)Regenerating golden-file fixtures under internal/markdown/testdata/...$(RESET)\n"
+	@printf "$(YELLOW)Diff the resulting files before committing.$(RESET)\n"
+	CGO_ENABLED=0 $(GO) test -tags update -count=1 ./...
 
 # -----------------------------------------------------------------------
 # Code Quality
