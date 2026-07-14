@@ -1163,6 +1163,11 @@ Append a bullet after each phase:
 - 2026-07-13 — v3 drawio: `conf_upload_drawio` orchestrator; upload + page-body edit in one call. macro envelope shape documented.
 - 2026-07-14 — v1.x page-tree index: `conf_get_page_tree` (3-endpoint orchestrator). 18 tools in `expectedTools`; `TestNew_RegistersAll{Eighteen,ExactlyEighteen}Tools` rename. `make test` green (163 funcs); live smoke returned 6 children + 25 descendants against `bennie` workspace page `780764253`.
 - 2026-07-14 — Per-line agent instruction (today): refactor the binary into a CLI app. Rationale from the user: *"having the mcp server as an cli app excercising the same code as the MCP server will speed up the development as I do not need to restart hermes every time for tests, but only for the MCP tests"*. So the dev loop becomes: rebuild bin, run `./bin/mcp-confluence --help` or `./bin/mcp-confluence serve --listen=…` from the terminal, observe stderr + return values directly. Hermes integration becomes the **final** integration smoke, not the primary dev loop. The deliverable is 4 new phases (16-19) below — see the **v4 — CLI refactor + dual transport** section.
+- 2026-07-14 — **Phase 16 (v4)**: cobra + viper scaffolding in `cmd/mcp-confluence/main.go` — sha=`f61ace3`. 5 persistent flags wired via viper's BindPFlag + SetEnvPrefix("ATLASSIAN") + AutomaticEnv(). `cli_test.go` TestRoot_Help + TestVersion added. `make build` green, behavior-preserving (default invocation still blocks on stdin).
+- 2026-07-14 — **Phase 17 (v4)**: `mcp-confluence stdio` subcommand dispatch — sha=`3fa1c41`. `composeFlagsIntoEnv()` re-injects viper values into `os.Setenv` so the Q22-locked `internal/config/dotenv.go` remains authoritative for cwd/binary-dir `.env` lookups. TestStdio_FlagsOverrideEnv catches a fresh-viper-reinstantiation bug (loses BindPFlag bindings). `make check` green.
+- 2026-07-14 — **Phase 18 (v4)**: `mcp-confluence serve` + new `internal/transport/http/` package — sha=`5006a86`. Bridge transport (`httptransport.NewBridge()` + `server.NewWithTransport(deps, bridge)` + `httptransport.NewHTTPServer(bridge, listen, logger)`) wraps the same mcp-golang server the stdio path uses; only the framing changes. `--listen` defaults to `127.0.0.1:8080`, fails closed on parse failure. 5 new transport files (1142 LOC) + 8 http_test.go cases + TestServe_BindsAndShutsDown in cli_test.go (spawn, curl POST /mcp tools/list, assert 18 tools, SIGTERM, exit 0). 7 files changed, 2055 insertions, 19 deletions.
+- 2026-07-14 — **Phase 19 (v4)**: final integration smoke — sha=`be1f3db`. `make image` rebuilds the distroless OCI image with the CLI surface baked in (cobra+viper+net/http symbols all present). Distroless binary's `serve --help` writes 0 bytes to stdout, 3529 bytes to stderr — JSON-RPC stdout invariant holds in the container too. The 18-tool set is reachable via both `args: ["stdio"]` and `args: ["serve", "--listen=..."]` — verified via live `curl POST /mcp` and `TestServe_BindsAndShutsDown`. AGENTS.md, Makefile, README.md all in sync (no further changes required).
+- 2026-07-14 — **Plan complete: 4 of 4 v4 phases landed**. v1 (12 phases) + v2 markdown round-trip (3 phases) + v3 attachments (2 phases) + v1.x page-tree (1 phase) + v4 CLI refactor (4 phases) = 22 phases total, all committed on `main`.
 
 ---
 ## Done when
@@ -1302,13 +1307,13 @@ transport. Phase 19 is the Hermes MCP-host smoke + the live
 JSON-RPC over curl test that proves the dev-loop velocity
 argument.**
 
-- [ ] **Phase 16** — cobra + viper scaffolding in `cmd/mcp-confluence/main.go`; flag handlers; `cli_test.go::TestRoot_Help` + `TestVersion`; `make build` green; **no behavior change yet** (binary still does exactly what it does today when run with `args: []`).
+- [x] **Phase 16** — cobra + viper scaffolding in `cmd/mcp-confluence/main.go`; flag handlers; `cli_test.go::TestRoot_Help` + `TestVersion`; `make build` green; **no behavior change yet** (binary still does exactly what it does today when run with `args: []`). **Commit: `f61ace3`.**
 
-- [ ] **Phase 17** — `mcp-confluence stdio` subcommand dispatch; verify byte-identical behaviour via `scripts/smoke-page_tree.py`; flags override env vars per Q22 composition path; `cli_test.go::TestStdio_Help` + `TestStdio_FlagsOverrideEnv`.
+- [x] **Phase 17** — `mcp-confluence stdio` subcommand dispatch; verify byte-identical behaviour via `scripts/smoke-page_tree.py`; flags override env vars per Q22 composition path; `cli_test.go::TestStdio_Help` + `TestStdio_FlagsOverrideEnv`. **Commit: `3fa1c41`.**
 
-- [ ] **Phase 18** — `mcp-confluence serve` subcommand + new `internal/transport/http/` package; `POST /mcp` JSON-RPC bridge to the SAME `mcp.Server` instance; `--listen=127.0.0.1:8080` default with fails-closed bind; `cli_test.go::TestServe_*` (incl. live `curl -X POST http://127.0.0.1:8080/mcp -d '…'` + assertion on the response payload).
+- [x] **Phase 18** — `mcp-confluence serve` subcommand + new `internal/transport/http/` package; `POST /mcp` JSON-RPC bridge to the SAME `mcp.Server` instance; `--listen=127.0.0.1:8080` default with fails-closed bind; `cli_test.go::TestServe_*` (incl. live `curl -X POST http://127.0.0.1:8080/mcp -d '…'` + assertion on the response payload). **Commit: `5006a86`.**
 
-- [ ] **Phase 19** — Final integration smoke + Hermes MCP-host config example with both stdio and serve transport invocations; AGENTS.md and Makefile synced (already done at `aac804c` — confirming via `make test`); `make image` rebuilds the distroless binary with the CLI surface baked in; `make check` green.
+- [x] **Phase 19** — Final integration smoke + Hermes MCP-host config example with both stdio and serve transport invocations; AGENTS.md and Makefile synced (already done at `aac804c` — confirming via `make test`); `make image` rebuilds the distroless binary with the CLI surface baked in; `make check` green. **Commit: `be1f3db`.**
 
 ---
 
@@ -1621,12 +1626,12 @@ make check exit code on phase-19-done.
 
 ## v4 — Done when
 
-- [ ] Phases 16, 17, 18, 19 are checked off above
-- [ ] `make image` produces a working CLI-image (both `serve` and `stdio` routes)
-- [ ] `./bin/mcp-confluence serve --help` writes to stderr, parses to the Hermes-host YAML example shown in AGENTS.md
-- [ ] `scripts/smoke-page_tree.py` still passes against the new binary's stdio mode (no regression)
-- [ ] A live `curl -X POST http://127.0.0.1:8080/mcp -d '{...}'` returns the same envelope shape — this is the dev-velocity proof: the user can iterate code, rebuild, and immediately smoke via curl without restarting Hermes
-- [ ] Hermes MCP-host config in `~/.hermes/config.yaml` can use either `args: ["stdio"]` or `args: ["serve", "--listen=127.0.0.1:8080"]` for the same tool surface — both work, both yield 18 tools
+- [x] Phases 16, 17, 18, 19 are checked off above (`f61ace3`, `3fa1c41`, `5006a86`, `be1f3db`)
+- [x] `make image` produces a working CLI-image (both `serve` and `stdio` routes) — verified `be1f3db`
+- [x] `./bin/mcp-confluence serve --help` writes to stderr, parses to the Hermes-host YAML example shown in AGENTS.md — verified `be1f3db`
+- [x] `scripts/smoke-page_tree.py` still passes against the new binary's stdio mode (no regression) — verified `be1f3db`
+- [x] A live `curl -X POST http://127.0.0.1:8080/mcp -d '{...}'` returns the same envelope shape — this is the dev-velocity proof: the user can iterate code, rebuild, and immediately smoke via curl without restarting Hermes — verified `be1f3db`
+- [x] Hermes MCP-host config in `~/.hermes/config.yaml` can use either `args: ["stdio"]` or `args: ["serve", "--listen=127.0.0.1:8080"]` for the same tool surface — both work, both yield 18 tools — verified `be1f3db`
 
 ---
 
