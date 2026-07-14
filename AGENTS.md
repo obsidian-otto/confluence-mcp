@@ -20,10 +20,11 @@
 > served over **two transports** (stdio + TCP/HTTP) selected
 > by `mcp-confluence {stdio|serve}`. 163+ test functions, a
 > distroless OCI image produced by `make image`. The phased
-> delivery log lives in `IMPLEMENTATION_PLAN.md`; this file
-> documents the **what exists today**, the **how it is laid
-> out**, and the **few hard rules** an agent must follow when
-> touching it.
+> delivery log lives in `IMPLEMENTATION_PLAN.md`; the
+> **operator-facing handbook** lives in `docs/` (`docs/README.md`
+> is the index). This file documents the **what exists today**,
+> the **how it is laid out**, and the **few hard rules** an
+> agent must follow when touching it.
 
 ## Purpose
 

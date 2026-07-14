@@ -16,6 +16,15 @@
 #   make image           # build OCI image via pack + Paketo Go BuildPak
 #   make docker-build    # plain-docker fallback when pack is unavailable
 #
+# For the operator-facing handbook (CLI usage, automation, AI-agent
+# config, troubleshooting), see docs/ — particularly:
+#   docs/01-cli-quick-start.md   the 5-minute walkthrough
+#   docs/02-automation-scripts.md Bash + Python examples
+#   docs/03-ai-agent-config.md    Hermes / Claude Desktop / Cursor configs
+#   docs/04-configuration-reference.md full env + flag + config-file matrix
+#   docs/05-architecture-decisions.md  the WHY behind the design
+#   docs/06-troubleshooting.md   diagnostic walkthrough
+#
 # Settings are loaded from (in priority order — per locked Q22):
 #   1. process environment
 #   2. .env in the current working directory
