@@ -195,13 +195,27 @@ JSON-RPC stream when running in stdio mode.`,
 		"TCP/HTTP listen address for the `serve` subcommand (host:port). "+
 			"Default binds to localhost only.")
 
-	// Subcommand factories. Both are stubs in Phase 16: they call
-	// run() directly, exactly like the v0.1 default invocation.
-	// Phase 17 specializes the stdio subcommand (flag composition
-	// path). Phase 18 specializes the serve subcommand (new
-	// internal/transport/http package).
+	// Subcommand factories. Phase 16 added stdio + serve stubs.
+	// Phase 17 specialized the stdio path. Phase 18 added the
+	// serve / HTTP transport.
+	//
+	// v5 Phase 20 — per-tool CLI subcommands. Each maps 1:1 to
+	// a registered MCP tool handler. CLI invocation produces the
+	// same result string the stdio / HTTP transports emit (the
+	// CLI dispatch is the ONE legitimate stdout writer in the
+	// binary — see cli_tool_dispatch.go for the full rationale).
+	// Phase 21 will add the remaining 13 subcommands
+	// (list_spaces, list_pages, get_page_body, get_page_tree,
+	// search, help, post_markdown, put_markdown, get_page_markdown,
+	// upload_attachment, list_attachments, delete_attachment,
+	// upload_drawio).
 	root.AddCommand(newStdioCmd())
 	root.AddCommand(newServeCmd())
+	root.AddCommand(newConfGetCmd())
+	root.AddCommand(newConfPostCmd())
+	root.AddCommand(newConfPutCmd())
+	root.AddCommand(newConfPatchCmd())
+	root.AddCommand(newConfDeleteCmd())
 
 	// Custom help / version writers. cobra's default templates
 	// write to the command's SetOut writer — we have set that to
@@ -640,7 +654,20 @@ func composeFlagsIntoEnv() {
 // registration examples. When cmd is a subcommand (e.g. "stdio" or
 // "serve") we show only the relevant registration block plus the
 // subcommand-specific instructions.
+//
+// Per-tool subcommands (the 5 CRUD subcommands added in Phase 20 —
+// see cli_tool_crud.go) ship their own USAGE / FLAGS / EXAMPLES /
+// HERMES REGISTRATION sections inside cmd.Long. For those commands
+// we short-circuit: just print cmd.Long verbatim, with no extra
+// boilerplate. The presence of "FLAGS (auto-generated from " in
+// cmd.Long is the marker we use to detect this case.
 func buildHelpText(cmd *cobra.Command) string {
+	if strings.Contains(cmd.Long, "FLAGS (auto-generated from ") {
+		// Per-tool subcommand. The Long text is the full
+		// help document; do not append any of the
+		// buildHelpText boilerplate.
+		return cmd.Long + "\n"
+	}
 	// Build the USAGE / FLAGS / ENV block. We re-use cobra's
 	// template engine for the boilerplate (flag list, command
 	// list) by writing directly to a strings.Builder, then
@@ -676,8 +703,10 @@ func buildHelpText(cmd *cobra.Command) string {
 		buf.WriteString("  -V, --version         Print the mcp-confluence version string\n")
 	}
 	if cmd.HasPersistentFlags() || cmd.HasLocalFlags() {
-		buf.WriteString("\nPersistent flags (apply to all subcommands):\n")
-		buf.WriteString(flagUsage(cmd.PersistentFlags()))
+		if cmd.HasPersistentFlags() {
+			buf.WriteString("\nPersistent flags (apply to all subcommands):\n")
+			buf.WriteString(flagUsage(cmd.PersistentFlags()))
+		}
 		if cmd.HasLocalFlags() {
 			buf.WriteString("\nLocal flags (this subcommand only):\n")
 			buf.WriteString(flagUsage(cmd.LocalFlags()))

@@ -769,3 +769,174 @@ func TestServe_BindsAndShutsDown(t *testing.T) {
 			ee.ExitCode(), full)
 	}
 }
+
+// --- Phase 20 — per-tool CLI subcommands (5 CRUD) -----------------------
+//
+// The five CRUD subcommands (conf_get, conf_post, conf_put, conf_patch,
+// conf_delete) expose the corresponding MCP tool handlers as direct
+// cobra subcommands. Each is a thin cobra→Handle* adapter — see
+// cli_tool_dispatch.go and cli_tool_crud.go for the implementation.
+//
+// These tests lock the operator-facing UX at the unit level: zero
+// bytes on stdout, the multi-section help text (Description, USAGE,
+// FLAGS, EXAMPLES, HERMES REGISTRATION) on stderr. They do NOT
+// exercise live Confluence calls (that is the scripts/smoke-*
+// suite) — Phase 21 will add live-invocation smoke once the
+// remaining 13 subcommands are wired and a make-gated dispatch
+// test is cheap to add.
+
+// runHelp returns the stdout / stderr buffers from running
+// `./bin/mcp-confluence <args...> --help` in a fresh subprocess.
+// Centralised here so the six tests below don't duplicate the
+// exec.Command scaffolding.
+func runHelp(t *testing.T, args ...string) (stdout, stderr string) {
+	t.Helper()
+	bin := binaryPath(t)
+	full := append([]string{}, args...)
+	full = append(full, "--help")
+	cmd := exec.Command(bin, full...)
+	cmd.Stdin = strings.NewReader("")
+	var so, se bytes.Buffer
+	cmd.Stdout = &so
+	cmd.Stderr = &se
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("%v --help exited non-zero: %v\nstderr:\n%s", args, err, se.String())
+	}
+	return so.String(), se.String()
+}
+
+// TestConfGet_Help locks the per-tool help contract for conf_get:
+// 0 bytes on stdout (the JSON-RPC channel — preserved across the
+// new dispatch surface), the four anchor sections on stderr, and
+// the auto-registered --path flag lifted from internal/tools.GetArgs.
+func TestConfGet_Help(t *testing.T) {
+	t.Parallel()
+	stdout, stderr := runHelp(t, "conf_get")
+	if stdout != "" {
+		t.Errorf("conf_get --help wrote %d bytes to stdout (must be 0): %q", len(stdout), stdout[:min(200, len(stdout))])
+	}
+	for _, want := range []string{
+		"HERMES REGISTRATION",
+		"EXAMPLES",
+		"--path",
+		"conf_get",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("conf_get --help stderr missing %q", want)
+		}
+	}
+}
+
+// TestConfGet_HelpMentionsTOONOutput locks the contract that the
+// default output format is TOON (the load-bearing token-savings
+// claim of the project — see README and the 18 tool handler
+// descriptions). The word "TOON" must appear in --help so an
+// operator using the CLI dispatch surface sees the same default
+// format the JSON-RPC transports emit.
+func TestConfGet_HelpMentionsTOONOutput(t *testing.T) {
+	t.Parallel()
+	_, stderr := runHelp(t, "conf_get")
+	if !strings.Contains(stderr, "TOON") {
+		t.Errorf("conf_get --help stderr must surface the TOON default output format")
+	}
+}
+
+// TestConfGet_FlagsListed locks the auto-generated FLAGS block.
+// Every field on internal/tools.GetArgs (Path, Query, JQ,
+// OutputFormat) must appear in the help text so a CLI operator
+// can discover the surface from --help alone (no separate
+// documentation lookup).
+func TestConfGet_FlagsListed(t *testing.T) {
+	t.Parallel()
+	_, stderr := runHelp(t, "conf_get")
+	for _, want := range []string{
+		"--path",
+		"--query",
+		"--jq",
+		"--outputFormat",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("conf_get --help FLAGS block missing %q", want)
+		}
+	}
+}
+
+// TestConfPost_Help mirrors TestConfGet_Help with the additional
+// assertion that --body is listed in the FLAGS block (PostArgs
+// has a Body field; GetArgs does not). The body flag is the
+// load-bearing difference between GET and POST — locking its
+// presence in --help catches a future regression where a struct
+// field is added to PostArgs but the FLAGS section loses it.
+func TestConfPost_Help(t *testing.T) {
+	t.Parallel()
+	stdout, stderr := runHelp(t, "conf_post")
+	if stdout != "" {
+		t.Errorf("conf_post --help wrote %d bytes to stdout (must be 0)", len(stdout))
+	}
+	for _, want := range []string{
+		"HERMES REGISTRATION",
+		"EXAMPLES",
+		"--path",
+		"--body",
+		"--jq",
+		"--outputFormat",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("conf_post --help stderr missing %q", want)
+		}
+	}
+}
+
+// TestConfPut_Help is the parallel gate for the PUT subcommand.
+// PUT shares the same shape as POST (full-replacement body),
+// so the --body flag must be present.
+func TestConfPut_Help(t *testing.T) {
+	t.Parallel()
+	stdout, stderr := runHelp(t, "conf_put")
+	if stdout != "" {
+		t.Errorf("conf_put --help wrote %d bytes to stdout (must be 0)", len(stdout))
+	}
+	for _, want := range []string{
+		"HERMES REGISTRATION",
+		"EXAMPLES",
+		"--path",
+		"--body",
+		"--jq",
+		"--outputFormat",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("conf_put --help stderr missing %q", want)
+		}
+	}
+}
+
+// TestConfDelete_Help locks the contract for the DELETE
+// subcommand. DeleteArgs has NO Body field (DELETE never sends a
+// body), so the --body flag must NOT appear — a regression
+// where a future struct field is auto-registered without a
+// description would surface here as a missing --body
+// suppression check is the positive way to catch it).
+//
+// We assert the four expected flags (path / query / jq /
+// outputFormat) and the four anchor sections (HERMES / EXAMPLES
+// / --path / conf_delete) to mirror the GET coverage.
+func TestConfDelete_Help(t *testing.T) {
+	t.Parallel()
+	stdout, stderr := runHelp(t, "conf_delete")
+	if stdout != "" {
+		t.Errorf("conf_delete --help wrote %d bytes to stdout (must be 0)", len(stdout))
+	}
+	for _, want := range []string{
+		"HERMES REGISTRATION",
+		"EXAMPLES",
+		"--path",
+		"--query",
+		"--jq",
+		"--outputFormat",
+		"conf_delete",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("conf_delete --help stderr missing %q", want)
+		}
+	}
+}
