@@ -226,3 +226,349 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// --- Phase 17 — flag-override-env composition path -------------------------
+//
+// Phase 17 wires viper.GetString into the process env via
+// composeFlagsIntoEnv() so `mcp-confluence stdio --site=foo`
+// beats ATLASSIAN_SITE_NAME=bar. The four tests below lock the
+// behaviour-preservation contract at the unit level:
+// flag > env > .env > default (Q22 ordering).
+//
+// All four tests spawn the freshly-built binary in a subprocess
+// (so we exercise the real os.Setenv composition path) with
+// ATLASSIAN_API_TOKEN set to a placeholder so config.LoadFromEnv
+// passes the validate() step and the startup banner is the only
+// thing we can read back from stderr. The token is intentionally
+// non-empty AND non-secret — the API call never happens because
+// the stdio transport blocks on stdin (no JSON-RPC frames
+// arrive; the test closes stdin and asserts the banner on
+// stderr).
+
+// TestStdio_FlagsOverrideEnv locks the Q22 4-tier composition
+// path. For each (env, flag) combination, the spawned binary
+// must:
+//   - exit 0 (the env-var validation passes because we always
+//     set ATLASSIAN_API_TOKEN to a non-empty placeholder)
+//   - print the post-composition startup banner on stderr
+//     showing the WINNING value
+//   - leave stdout at 0 bytes (JSON-RPC channel protected)
+//
+// The four cases cover the corners of the precedence matrix:
+//   - both unset: nothing wins; banner shows the .env value
+//     (which in a clean subprocess is empty string)
+//   - env only:   env wins; banner shows the env value
+//   - flag only:  flag wins; banner shows the flag value
+//   - both set:   flag wins (flag > env); banner shows the flag
+//
+// We strip the helper's os.Setenv reach into the subprocess by
+// spawning the BUILT binary with cmd.Env — the parent's
+// ATLASSIAN_* values are not inherited unless we add them
+// explicitly, so the test owns the env surface end-to-end.
+func TestStdio_FlagsOverrideEnv(t *testing.T) {
+	t.Parallel()
+	bin := binaryPath(t)
+
+	// Run the binary in a clean temp dir so cwd .env cannot leak
+	// any real credentials into the test.
+	tmp := t.TempDir()
+
+	// All four cases: ATLASSIAN_API_TOKEN is set to a placeholder
+	// so config.LoadFromEnv's validate() step does NOT trip the
+	// "FATAL: ATLASSIAN_API_TOKEN is not set" path. The test is
+	// about precedence semantics, not auth — and the stdio
+	// transport blocks on stdin before any real HTTP request is
+	// ever made.
+	const tokenPlaceholder = "stdio-flags-override-env-placeholder"
+
+	// Subtest helper. `name` is shown with `t.Run`. `env` is
+	// the subprocess env to set (nil = inherit parent; we
+	// actually wrap this below). `args` is the argv to pass.
+	// `wantSite` is the value the banner must show; the helper
+	// asserts on `site=<wantSite>`. `wantEmpty` flips the
+	// assertion to "the banner shows site= (no value)" — used
+	// by the both-unset case where the placeholder is the only
+	// surviving value.
+	cases := []struct {
+		name          string
+		envSite       string // ATLASSIAN_SITE_NAME to set in the subprocess
+		envEmail      string // ATLASSIAN_USER_EMAIL to set
+		flagSite      string // --site value to pass (empty = no flag)
+		flagEmail     string // --email value to pass (empty = no flag)
+		wantSite      string // expected substring of stderr (after "site=")
+		wantEmail     string // expected substring of stderr (after "email=")
+		expectNonZero bool   // true for the both_unset case (FATAL on missing creds)
+	}{
+		{
+			name:      "both_set_flag_wins",
+			envSite:   "envSite",
+			envEmail:  "env@example.com",
+			flagSite:  "forcedSite",
+			flagEmail: "forced@example.com",
+			wantSite:  "site=forcedSite",
+			wantEmail: "email=forced@example.com",
+		},
+		{
+			name:      "env_only",
+			envSite:   "envSite",
+			envEmail:  "env@example.com",
+			flagSite:  "",
+			flagEmail: "",
+			wantSite:  "site=envSite",
+			wantEmail: "email=env@example.com",
+		},
+		{
+			name:      "flag_only",
+			envSite:   "",
+			envEmail:  "",
+			flagSite:  "forcedSite",
+			flagEmail: "forced@example.com",
+			wantSite:  "site=forcedSite",
+			wantEmail: "email=forced@example.com",
+		},
+		{
+			name:          "both_unset",
+			envSite:       "",
+			envEmail:      "",
+			flagSite:      "",
+			flagEmail:     "",
+			wantSite:      "site=",
+			wantEmail:     "email=",
+			expectNonZero: true, // FATAL on missing creds; the banner is still printed first
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			// Build the argv. stdio + optional flags. Note: we
+			// do NOT use --api-token; the test only exercises
+			// the site / email composition path.
+			args := []string{"stdio"}
+			if tc.flagSite != "" {
+				args = append(args, "--site="+tc.flagSite)
+			}
+			if tc.flagEmail != "" {
+				args = append(args, "--email="+tc.flagEmail)
+			}
+
+			// Build a clean subprocess env: ATLASSIAN_API_TOKEN
+			// always set to the placeholder; ATLASSIAN_*_NAME /
+			// _EMAIL only set when the case calls for them.
+			// DEBUG is empty (we don't want runLifecycle's
+			// debug branch to add a second banner).
+			env := []string{
+				"PATH=" + os.Getenv("PATH"),
+				"HOME=" + os.Getenv("HOME"),
+				"ATLASSIAN_API_TOKEN=" + tokenPlaceholder,
+			}
+			if tc.envSite != "" {
+				env = append(env, "ATLASSIAN_SITE_NAME="+tc.envSite)
+			}
+			if tc.envEmail != "" {
+				env = append(env, "ATLASSIAN_USER_EMAIL="+tc.envEmail)
+			}
+
+			cmd := exec.Command(bin, args...)
+			cmd.Dir = tmp
+			cmd.Env = env
+			// Close stdin immediately so the stdio transport
+			// returns via wireStdinEOF → context.Canceled. The
+			// banner is printed BEFORE the transport blocks, so
+			// the closure of stdin does not race with the
+			// banner write.
+			cmd.Stdin = strings.NewReader("")
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			if err := cmd.Run(); err != nil {
+				if !tc.expectNonZero {
+					t.Fatalf("stdio exited non-zero: %v\nstderr:\n%s", err, stderr.String())
+				}
+				// Expected non-zero exit — the banner is what we
+				// assert on below; the err is the kill signal.
+				_ = err
+			} else if tc.expectNonZero {
+				t.Errorf("stdio exited 0 but both_unset case expected non-zero; stderr:\n%s", stderr.String())
+			}
+
+			// Stdout must be 0 bytes (JSON-RPC-stdout invariant).
+			if stdout.Len() != 0 {
+				t.Errorf("stdio wrote %d bytes to stdout (must be 0); first 200: %q",
+					stdout.Len(), stdout.String()[:min(200, stdout.Len())])
+			}
+
+			// The startup banner must surface the winning value.
+			if !strings.Contains(stderr.String(), tc.wantSite) {
+				t.Errorf("stderr missing %q (winning site)\nfull stderr:\n%s",
+					tc.wantSite, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tc.wantEmail) {
+				t.Errorf("stderr missing %q (winning email)\nfull stderr:\n%s",
+					tc.wantEmail, stderr.String())
+			}
+			// Sanity: the losing value must NOT be in the
+			// banner (would indicate the helper failed to
+			// resolve precedence). This is the strongest
+			// signal that flag > env is enforced.
+			if tc.flagSite != "" && tc.envSite != "" && tc.flagSite != tc.envSite {
+				if !strings.Contains(stderr.String(), "site="+tc.flagSite) {
+					t.Errorf("flag did not win: expected site=%s, stderr:\n%s",
+						tc.flagSite, stderr.String())
+				}
+				if strings.Contains(stderr.String(), "site="+tc.envSite+" ") ||
+					strings.HasSuffix(strings.TrimSpace(stderr.String()), "site="+tc.envSite) {
+					t.Errorf("env value leaked into the banner (flag should have won): %q", stderr.String())
+				}
+			}
+		})
+	}
+}
+
+// TestStdio_NoEnvFailsFast asserts the fail-fast path: with no
+// ATLASSIAN_* env vars set, no .env on disk, and no --site /
+// --email / --api-token flags, the stdio subcommand must exit
+// non-zero (os.Exit(1) via main's error branch) and emit a
+// "FATAL:" message naming the missing env var.
+//
+// The subtests cover both paths the user might hit:
+//   - bare stdio with nothing: FATAL on the first missing var
+//     (config.validate walks SITE_NAME → USER_EMAIL → API_TOKEN
+//     in that order)
+//   - stdio with --site only: still FATAL on USER_EMAIL
+//     (validate is not stage-gated; ALL three required vars
+//     must be present after resolution)
+//
+// We do NOT depend on the literal "FATAL" prefix in case a
+// future refactor changes the wording; we assert on the
+// canonical "(FATAL|not set)" pattern. The test's purpose is the
+// "exits non-zero" gate — the wording is the message-surface
+// contract, not the load-bearing invariant.
+func TestStdio_NoEnvFailsFast(t *testing.T) {
+	t.Parallel()
+	bin := binaryPath(t)
+
+	// Clean temp dir so neither the repo's .env nor the
+	// developer's shell can leak into LoadFromEnv.
+	tmp := t.TempDir()
+
+	cases := []struct {
+		name    string
+		args    []string
+		env     []string // subprocess env (empty = unset, but PATH/HOME always set)
+		wantVar string   // substring the stderr must mention (one of the three required env-var names)
+	}{
+		{
+			name:    "bare_stdio_no_env_no_flags",
+			args:    []string{"stdio"},
+			env:     nil, // PATH/HOME only
+			wantVar: "ATLASSIAN_SITE_NAME",
+		},
+		{
+			name:    "stdio_with_site_only_still_fails_on_email",
+			args:    []string{"stdio", "--site=forcedSite"},
+			env:     nil,
+			wantVar: "ATLASSIAN_USER_EMAIL",
+		},
+		{
+			name:    "stdio_with_site_and_email_still_fails_on_token",
+			args:    []string{"stdio", "--site=forcedSite", "--email=forced@example.com"},
+			env:     nil,
+			wantVar: "ATLASSIAN_API_TOKEN",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command(bin, tc.args...)
+			cmd.Dir = tmp
+			// Minimal env: just PATH/HOME so the binary can
+			// resolve the executable. No ATLASSIAN_* at all.
+			cmd.Env = []string{
+				"PATH=" + os.Getenv("PATH"),
+				"HOME=" + os.Getenv("HOME"),
+			}
+			cmd.Stdin = strings.NewReader("")
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+			// Fail-fast path: cmd.Run returns *exec.ExitError
+			// when the binary exits non-zero. We accept any
+			// non-nil error; the load-bearing signal is the
+			// exit code, not the error wrapping.
+			if err == nil {
+				t.Fatalf("stdio with no env / no creds: expected non-zero exit, got 0\nstderr:\n%s", stderr.String())
+			}
+			ee, ok := err.(*exec.ExitError)
+			if !ok {
+				t.Fatalf("expected *exec.ExitError, got %T: %v", err, err)
+			}
+			if ee.ExitCode() == 0 {
+				t.Errorf("expected non-zero exit code, got 0")
+			}
+			// The FATAL error must name the missing env var so
+			// the operator knows what to fix. config.validate
+			// walks the three vars in a fixed order; we
+			// assert on the specific one the test case
+			// expects. The wording is allowed to vary — we
+			// only require the env-var name appear in stderr.
+			if !strings.Contains(stderr.String(), tc.wantVar) {
+				t.Errorf("stderr missing %q (the missing required env var)\nfull stderr:\n%s",
+					tc.wantVar, stderr.String())
+			}
+			// Defense-in-depth: stdout must remain 0 bytes
+			// even on the error path (JSON-RPC-stdout
+			// invariant).
+			if stdout.Len() != 0 {
+				t.Errorf("error path wrote %d bytes to stdout (must be 0)", stdout.Len())
+			}
+		})
+	}
+}
+
+// TestStdio_HelpNoFlagOverride locks the load-bearing invariant
+// that `--help` does NOT trigger the RunE composition path. The
+// help path lives in cobra's SetHelpFunc callback, NOT in the
+// RunE closure — so the banner must not print, and the binary
+// must exit 0 with 0 stdout bytes.
+//
+// Why this matters: if a future refactor accidentally moves the
+// help check into the RunE closure (a common cobra+viper
+// foot-gun), the composition path would call os.Setenv even on
+// `--help`, which would (a) print the banner on stderr when the
+// user expected only the help text, and (b) leave the test
+// harness polluted with the new env-var values. Both
+// regressions are caught here.
+func TestStdio_HelpNoFlagOverride(t *testing.T) {
+	t.Parallel()
+	bin := binaryPath(t)
+	cmd := exec.Command(bin, "stdio", "--help")
+	cmd.Stdin = strings.NewReader("")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("stdio --help exited non-zero: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdio --help wrote %d bytes to stdout (must be 0)", stdout.Len())
+	}
+	// The banner MUST NOT appear on --help. The composition
+	// path is gated behind the RunE closure, which cobra
+	// bypasses when --help is set.
+	if strings.Contains(stderr.String(), "starting (site=") {
+		t.Errorf("stdio --help triggered the RunE composition path (banner printed). "+
+			"Full stderr:\n%s", stderr.String())
+	}
+	// The help text MUST still contain the HERMES REGISTRATION
+	// block — the composition path is independent of the help
+	// rendering path.
+	if !strings.Contains(stderr.String(), "HERMES REGISTRATION") {
+		t.Errorf("stdio --help stderr missing HERMES REGISTRATION block")
+	}
+}

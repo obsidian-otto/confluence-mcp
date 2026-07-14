@@ -158,11 +158,15 @@ JSON-RPC stream when running in stdio mode.`,
 		// bad flags, etc.) or a clean-shutdown Canceled.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default invocation (no subcommand) behaves EXACTLY
-			// like the v0.1 binary: hand off to run() with no
-			// subcommand-specific dispatch. Phase 17 will make the
-			// stdio subcommand explicit; for Phase 16 the
-			// default-invocation path is the behavior-preservation
-			// gate (TestRoot_NoSubcommand_BehavesLikeStdio).
+			// like `mcp-confluence stdio`: viper resolves the
+			// flag > env > .env picture, the values are
+			// re-injected into the process env so the Q22
+			// loader (config.LoadFromEnv) sees them at the
+			// process-env tier, then run() is called unchanged.
+			// The helper is shared with the stdio subcommand
+			// RunE so the two paths are byte-for-byte
+			// identical in precedence semantics.
+			composeFlagsIntoEnv()
 			return run()
 		},
 	}
@@ -231,11 +235,17 @@ JSON-RPC stream when running in stdio mode.`,
 	return root
 }
 
-// newStdioCmd returns the `stdio` subcommand. Phase 16 stub:
-// delegates to run() directly. Phase 17 will compose the flag values
-// (via viper) into the process env before run() so that
-// config.LoadFromEnv sees flag > process env > cwd .env > binary-dir
-// .env (Q22 locked).
+// newStdioCmd returns the `stdio` subcommand. Phase 17 wires the
+// flag-composition path: viper reads (flag > env > config) are
+// re-injected into the process env via os.Setenv so the locked Q22
+// .env ordering (flag → process env → cwd .env → binary-dir .env)
+// is preserved by composition — internal/config is untouched.
+//
+// The same composeFlagsIntoEnv() helper is shared with the root
+// RunE so `mcp-confluence stdio --site=...` and the default
+// invocation `mcp-confluence --site=...` produce identical
+// semantics: flag values win over ATLASSIAN_* env vars, and the
+// startup banner on stderr shows the resolved site + email.
 func newStdioCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "stdio",
@@ -247,10 +257,9 @@ canonical Hermes MCP-host integration path.
 
 Persistent flags (--site, --email, --api-token, --debug, --config)
 are honored via viper; flag values are re-injected into the process
-env so the locked Q22 .env ordering is preserved by composition
-(Phase 17 wires the read path; for Phase 16 the stub calls run()
-directly and the flags are accepted-but-ignored).`,
+env so the locked Q22 .env ordering is preserved by composition.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			composeFlagsIntoEnv()
 			return run()
 		},
 	}
@@ -293,11 +302,32 @@ introduces the TCP/HTTP listener and the --listen flag.`,
 // legacy var names (SITE_NAME, USER_EMAIL, API_TOKEN, DEBUG) so
 // the precedence is consistent across flag/env.
 //
-// Phase 16 only sets up the bindings — the actual viper.GetString
-// reads happen in Phase 17 (stdio) and Phase 18 (serve). For Phase
-// 16 the bindings are registered but no RunE closure reads from
-// viper, so the flag values are accepted-but-ignored (Q22 dotenv
-// ordering is preserved verbatim by run()'s config.LoadFromEnv call).
+// pkgViper is the package-level binding of viper that
+// bindViperToFlags populates and composeFlagsIntoEnv reads from.
+//
+// viper's README recommends "initialize a Viper instance and pass that
+// around when necessary" — but in a single-binary CLI where the
+// root cobra command constructs the viper instance and 1+ RunE
+// closures need to read it, package-private globals are the
+// simplest correct storage. A wide-area singleton with exported
+// name would be unsafe; a package-private (lowercase) name is
+// fine — only the local functions below can read or write it.
+//
+// Order-of-operations invariant: bindViperToFlags MUST be called
+// before composeFlagsIntoEnv on every invocation path. The
+// newRootCmd factory is the only call to bindViperToFlags and it
+// runs synchronously before Execute() walks the RunE tree.
+var pkgViper *viper.Viper
+
+// bindViperToFlags sets the package-level pkgViper. The viper
+// instance has both the AutomaticEnv env-binding AND the BindPFlag
+// pflag-binding, so viper.GetString("site") inside
+// composeFlagsIntoEnv reads the flag when present and falls back
+// to the env var when the flag is absent.
+//
+// (We intentionally do NOT return the viper instance from this
+// helper — Phase 16's signature was the zero-argument one. The
+// package-private singleton is the minimum plumbing.)
 func bindViperToFlags(pflags *pflag.FlagSet) {
 	v := viper.New()
 	v.SetEnvPrefix("ATLASSIAN")
@@ -333,6 +363,98 @@ func bindViperToFlags(pflags *pflag.FlagSet) {
 	// --config is a path flag; Phase 16/17/18 don't read its
 	// value into viper yet. It's registered so --help lists it;
 	// future phases may wire it through v.ReadInConfig().
+	pkgViper = v
+}
+
+// composeFlagsIntoEnv is the Phase 17 flag-composition path: it
+// reads the resolved viper picture (flag > env > config) for the
+// three required settings and re-injects any non-empty value into
+// the appropriate ATLASSIAN_* env var. After this call returns,
+// the env-var tier the Q22-locked config.LoadFromEnv reads from
+// already reflects the flag values, so the locked 4-tier ordering
+//
+//	flag (viper) → process env (setenv) → cwd .env → binary-dir .env
+//
+// is preserved by composition — internal/config/* is NOT touched.
+//
+// Both the stdio subcommand RunE and the root RunE call this
+// helper BEFORE run() so `mcp-confluence --site=foo`,
+// `mcp-confluence stdio --site=foo`, and (when the user sets the
+// var via the process env) `mcp-confluence --site=foo` with
+// ATLASSIAN_SITE_NAME=bar all converge on the same final value
+// (the flag wins; env is the next tier; .env files the last two).
+//
+// A single startup banner is also printed to stderr using the
+// post-composition env-var values so the operator (and the
+// TestStdio_FlagsOverrideEnv gate) can see at a glance which
+// value the binary will actually use:
+//
+//	mcp-confluence v0.1.0 starting (site=<site>, email=<email>)
+//
+// This is the same one-liner the v0.1 binary prints (see
+// runLifecycle's cfg.Debug branch), so existing log-parsing
+// isn't disrupted — Phase 17 lifts the line out of the
+// cfg.Debug guard so it fires unconditionally. When DEBUG=true
+// the same line is then re-printed by runLifecycle alongside
+// the API-token-redaction note; both lines are stable.
+func composeFlagsIntoEnv() {
+	// Read from the package-singleton pkgViper that bindViperToFlags
+	// already configured. This is the SAME viper instance the
+	// PersistentFlags are bound to, so flag > env > config precedence
+	// already applies: viper.GetString here reads the flag value if
+	// present, else the env var, else "".
+	//
+	// (Re-creating a fresh viper.New() in this helper was the bug
+	// the test suite caught — see TestStdio_FlagsOverrideEnv. The
+	// fresh instance had only BindEnv mappings and never saw the
+	// pflag bindings, so flag values were silently dropped.)
+	v := pkgViper
+	if v == nil {
+		// Defensive: bindViperToFlags was not called. This shouldn't
+		// happen in production (newRootCmd always calls it before
+		// any RunE fires) but a unit test that synthesises the
+		// helper directly would trip here. We log+continue rather
+		// than panic so the rest of the binary still works.
+		log.Printf("composeFlagsIntoEnv: pkgViper not initialised; flag composition disabled")
+		v = viper.New()
+		v.SetEnvPrefix("ATLASSIAN")
+		v.AutomaticEnv()
+		_ = v.BindEnv("site", "SITE_NAME")
+		_ = v.BindEnv("email", "USER_EMAIL")
+		_ = v.BindEnv("api-token", "API_TOKEN")
+		_ = v.BindEnv("debug", "DEBUG")
+	}
+
+	// Inject each non-empty value into the appropriate
+	// ATLASSIAN_* env var. viper.GetString returns "" for
+	// unset keys; we treat that as "leave the existing env
+	// value alone" so a stale .env file or a partial flag set
+	// cannot accidentally wipe a real value.
+	if s := v.GetString("site"); s != "" {
+		_ = os.Setenv("ATLASSIAN_SITE_NAME", s)
+	}
+	if s := v.GetString("email"); s != "" {
+		_ = os.Setenv("ATLASSIAN_USER_EMAIL", s)
+	}
+	if s := v.GetString("api-token"); s != "" {
+		_ = os.Setenv("ATLASSIAN_API_TOKEN", s)
+	}
+	// DEBUG is bool-typed in viper's env binding; we don't
+	// re-inject it because (a) config.LoadFromEnv reads it
+	// from the env anyway, (b) the only consumer is the
+	// cfg.Debug branch in runLifecycle, and (c) the value
+	// surface is intentionally not promoted via os.Setenv to
+	// keep the helper focused on the three required creds.
+
+	// Post-composition startup banner. The values are read
+	// from the process env so they reflect the resolution
+	// order the rest of the binary will see (flag-injected
+	// values win; .env values fill the gaps).
+	fmt.Fprintf(os.Stderr, "mcp-confluence %s starting (site=%s, email=%s)\n",
+		version,
+		os.Getenv("ATLASSIAN_SITE_NAME"),
+		os.Getenv("ATLASSIAN_USER_EMAIL"),
+	)
 }
 
 // buildHelpText returns the multi-section help text used by
