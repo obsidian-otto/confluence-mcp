@@ -32,9 +32,12 @@ $EDITOR .env
 
 - Each of the 18 MCP tools is also exposed as a first-class
   cobra subcommand — invoke directly from the shell
-  (`./bin/mcp-confluence conf_get --path=...` → TOON-encoded
-  Confluence data on stdout). Full table in
-  [AGENTS.md §"Per-tool subcommands (v5)"](AGENTS.md).
+  (`./bin/mcp-confluence get --path=...` → TOON-encoded
+  Confluence data on stdout). The v6 rename drops the `conf_`
+  prefix from the per-tool subcommand names; the underlying
+  MCP tool names (e.g. `mcp__confluence_conf_get`) are
+  frozen. Full table in
+  [AGENTS.md §"Per-tool subcommands (v6)"](AGENTS.md).
 
 See [docs/01-cli-quick-start.md](docs/01-cli-quick-start.md)
 for the full walkthrough, [docs/02-automation-scripts.md](docs/02-automation-scripts.md)

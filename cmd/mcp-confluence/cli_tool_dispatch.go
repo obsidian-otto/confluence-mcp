@@ -24,7 +24,7 @@
 //  3. The CLI dispatch is the ONE legitimate stdout writer in
 //     this binary. The stdio / HTTP transports reserve stdout
 //     for the JSON-RPC wire; the CLI transport (i.e. the user
-//     typing `mcp-confluence conf_get --path=...` in a shell)
+//     the user typing `mcp-confluence get --path=...` in a shell)
 //     is the legitimate use case for writing tool results to
 //     stdout. See runToolInvocation below — that is the ONLY
 //     place in the package that calls fmt.Println.
@@ -84,28 +84,28 @@ import (
 // the map values are interchangeable.
 var toolHandlers = map[string]func(context.Context, *atlassian.Client, json.RawMessage) (string, error){
 	// Phase 20 — 5 CRUD (raw REST pass-through)
-	"conf_get":    internal.HandleGet,
-	"conf_post":   internal.HandlePost,
-	"conf_put":    internal.HandlePut,
-	"conf_patch":  internal.HandlePatch,
-	"conf_delete": internal.HandleDelete,
+	"get":    internal.HandleGet,
+	"post":   internal.HandlePost,
+	"put":    internal.HandlePut,
+	"patch":  internal.HandlePatch,
+	"delete": internal.HandleDelete,
 	// Phase 21 — 6 convenience (typed wrappers over /wiki/api/v2/*)
-	"conf_list_spaces":   internal.HandleListSpaces,
-	"conf_list_pages":    internal.HandleListPages,
-	"conf_get_page_body": internal.HandleGetPageBody,
-	"conf_get_page_tree": internal.HandleGetPageTree,
-	"conf_search":        internal.HandleSearch,
-	"conf_help":          internal.HandleHelp,
+	"list_spaces":   internal.HandleListSpaces,
+	"list_pages":    internal.HandleListPages,
+	"get_page_body": internal.HandleGetPageBody,
+	"get_page_tree": internal.HandleGetPageTree,
+	"search":        internal.HandleSearch,
+	"help":          internal.HandleHelp,
 	// Phase 21 — 3 markdown (round-trip conf_post/put via internal/markdown)
-	"conf_post_markdown":     internal.HandlePostMarkdown,
-	"conf_put_markdown":      internal.HandlePutMarkdown,
-	"conf_get_page_markdown": internal.HandleGetPageMarkdown,
+	"post_markdown":     internal.HandlePostMarkdown,
+	"put_markdown":      internal.HandlePutMarkdown,
+	"get_page_markdown": internal.HandleGetPageMarkdown,
 	// Phase 21 — 3 attachments (v1 upload + v2 list/delete)
-	"conf_upload_attachment": internal.HandleUploadAttachment,
-	"conf_list_attachments":  internal.HandleListAttachments,
-	"conf_delete_attachment": internal.HandleDeleteAttachment,
+	"upload_attachment": internal.HandleUploadAttachment,
+	"list_attachments":  internal.HandleListAttachments,
+	"delete_attachment": internal.HandleDeleteAttachment,
 	// Phase 21 — 1 drawio (upload + embed in one call)
-	"conf_upload_drawio": internal.HandleUploadDrawio,
+	"upload_drawio": internal.HandleUploadDrawio,
 }
 
 // toolHandler returns the Handle* function for the given tool

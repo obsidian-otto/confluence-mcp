@@ -1,7 +1,7 @@
 // cmd/mcp-confluence/cli_tool_drawio.go
 //
 // Phase 21 — per-tool CLI subcommand for the drawio handler
-// (conf_upload_drawio). The most complex of the 18 subcommands
+// (upload_drawio). The most complex of the 18 subcommands
 // because the args struct carries two mutually-exclusive axes:
 //
 //   - 3 INPUT modes (exactly one of):
@@ -42,16 +42,16 @@ import (
 	internal "github.com/bennie/mcp-confluence/internal/tools"
 )
 
-// newConfUploadDrawioCmd returns the `conf_upload_drawio`
+// newUploadDrawioCmd returns the `upload_drawio`
 // subcommand. It maps 1:1 to internal.HandleUploadDrawio —
 // uploads a drawio file (XML, or PNG/SVG with embedded XML)
 // AND embeds it on the page in one call.
-func newConfUploadDrawioCmd() *cobra.Command {
+func newUploadDrawioCmd() *cobra.Command {
 	args := &internal.UploadDrawioArgs{}
 	cmd := &cobra.Command{
-		Use:   "conf_upload_drawio",
+		Use:   "upload_drawio",
 		Short: "Upload a drawio diagram and embed it on a Confluence page in one call",
-		Long: `conf_upload_drawio uploads a drawio diagram (XML, or PNG/SVG with
+		Long: `upload_drawio uploads a drawio diagram (XML, or PNG/SVG with
 embedded drawio XML) and embeds it on a Confluence page in one
 call (TOON-encoded response envelope, by default). The wire flow
 fans out up to 4 REST calls — create page (if needed), upload
@@ -78,7 +78,7 @@ TARGET MODES (exactly one of):
                             creates the page AND embeds the macro on it.
 
 USAGE:
-  mcp-confluence conf_upload_drawio [flags]
+  mcp-confluence upload_drawio [flags]
 
 FLAGS (auto-generated from internal/tools.UploadDrawioArgs):
       --pageId string          Numeric page id of an EXISTING page (mutually exclusive with --spaceId).
@@ -96,25 +96,25 @@ FLAGS (auto-generated from internal/tools.UploadDrawioArgs):
 
 EXAMPLES:
   # Create a NEW page with an embedded drawio diagram:
-  mcp-confluence conf_upload_drawio \
+  mcp-confluence upload_drawio \
       --spaceId=780763211 --title='Architecture v2' \
       --drawioFile=/home/bennie/diagrams/arch.drawio
 
   # Embed a diagram on an EXISTING page:
-  mcp-confluence conf_upload_drawio --pageId=163935 \
+  mcp-confluence upload_drawio --pageId=163935 \
       --drawioPngFile=/home/bennie/diagrams/arch.drawio.png
 
   # Custom display name and macro size:
-  mcp-confluence conf_upload_drawio --pageId=163935 \
+  mcp-confluence upload_drawio --pageId=163935 \
       --drawioFile=/home/bennie/diagrams/seq.drawio \
       --diagramDisplayName='Sequence diagram' --width=900 --height=600
 
   # Return just the two ids (attachment + custom-content) for follow-up:
-  mcp-confluence conf_upload_drawio --pageId=163935 --drawioFile=/tmp/x.drawio \
+  mcp-confluence upload_drawio --pageId=163935 --drawioFile=/tmp/x.drawio \
       --jq='{attachmentId: attachmentId, customContentId: customContentId, pageId: page.id}'
 
   # SVG variant:
-  mcp-confluence conf_upload_drawio --pageId=163935 \
+  mcp-confluence upload_drawio --pageId=163935 \
       --drawioSvgFile=/home/bennie/diagrams/seq.drawio.svg
 
 HERMES REGISTRATION:
@@ -129,13 +129,13 @@ HERMES REGISTRATION:
   # Use from a Makefile for a "publish diagram" target:
   #
   #   publish-diagram:
-  #       mcp-confluence conf_upload_drawio \
+  #       mcp-confluence upload_drawio \
   #           --spaceId=$$SPACE_ID --title=$$TITLE \
   #           --drawioFile=$$SOURCE \
   #           --jq='{attachmentId: attachmentId, customContentId: customContentId}'
   #
   # For general binary attachments (PNG, PDF, DOCX, etc. that
-  # are NOT drawio diagrams) use conf_upload_attachment instead
+  # are NOT drawio diagrams) use upload_attachment instead
   # — it accepts any binary format and does not wrap with the
   # drawio-specific macro insertion.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -143,7 +143,7 @@ HERMES REGISTRATION:
 		},
 	}
 	if err := registerFlagsFromArgsStruct(cmd, args); err != nil {
-		panic("conf_upload_drawio: registerFlagsFromArgsStruct: " + err.Error())
+		panic("upload_drawio: registerFlagsFromArgsStruct: " + err.Error())
 	}
 	return cmd
 }

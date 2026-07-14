@@ -4,12 +4,20 @@
 > project. The deep technical content lives in `specs/`; this
 > file summarizes and points — it doesn't replace.
 >
-> **What this project is (post-2026-07-14 CLI refactor):** A
+> **What this project is (post-2026-07-14 CLI refactor; v6 unprefixed rename):** A
 > Confluence MCP server packaged as a **CLI app**. The single
-> `mcp-confluence` binary exposes four subcommands — `stdio`
+> `mcp-confluence` binary exposes **22 subcommands** — `stdio`
 > (default; serve the 18 MCP tools over JSON-RPC on stdio, the
 > classic Hermes-MCP-server mode), `serve` (serve the same 18
-> tools over a TCP/HTTP transport), and `help`/`version`. All
+> tools over a TCP/HTTP transport), 18 **per-tool dispatch
+> subcommands** (`get`, `post`, `put`, `patch`, `delete`,
+> `list_spaces`, `list_pages`, `get_page_body`, `get_page_tree`,
+> `search`, `help`, `post_markdown`, `put_markdown`,
+> `get_page_markdown`, `upload_attachment`, `list_attachments`,
+> `delete_attachment`, `upload_drawio`) for direct shell
+> invocation, and `help`/`version`. The 18 per-tool subcommand
+> names are **unprefixed** in v6; the underlying MCP tool names
+> (`mcp__confluence_conf_get` etc.) are **frozen**. All
 > subcommands share a single process, a single tool surface,
 > and the locked Q22 settings-resolution order.
 >
@@ -272,7 +280,7 @@ instead of newline-delimited JSON over a stdio fd.
 > Caddy, Envoy) in front of `--listen`. A future v1.x may add
 > native `--tls-cert` / `--tls-key` flags.
 
-### Per-tool subcommands (v5)
+### Per-tool subcommands (v6)
 
 Each of the 18 MCP tools is also exposed as a first-class
 cobra subcommand — invoke directly from the shell, a
@@ -280,33 +288,38 @@ Makefile target, a shell script, or a `jq` pipeline. The
 `v5` plan (Phases 20-22) wires 18 new subcommands on top
 of the same `Handle*` functions the MCP transports invoke;
 the CLI surface returns **byte-identical output** to a
-`tools/call` JSON-RPC invocation. The dev-velocity loop
+`tools/call` JSON-RPC invocation. The `v6` rename drops
+the `conf_` prefix from the per-tool subcommand names —
+the MCP tool names (`mcp__confluence_conf_get` etc.) are
+frozen, but the binary subcommand invocation is now
+unprefixed (`mcp-confluence get`). The dev-velocity loop
 the user asked for becomes: rebuild → run subcommand → see
 output → repeat, with no Hermes restart, no `hermes mcp
 test confluence` round-trip, and no JSON-RPC framing.
 
-**The 18 per-tool subcommands** (verbatim, frozen names):
+**The 18 per-tool subcommands** (unprefixed; MCP tool
+column is the frozen wire identifier):
 
 | Subcommand | Args required | MCP tool |
 | --- | --- | --- |
-| `conf_get` | `--path` | `conf_get` |
-| `conf_post` | `--path`, `--body` | `conf_post` |
-| `conf_put` | `--path`, `--body` | `conf_put` |
-| `conf_patch` | `--path`, `--body` (RFC 6902 JSON Patch array) | `conf_patch` |
-| `conf_delete` | `--path` | `conf_delete` |
-| `conf_list_spaces` | (optional `--limit`, `--cursor`, `--type`, `--status`) | `conf_list_spaces` |
-| `conf_list_pages` | `--space-id` *or* `--space-key` (optional `--title`, `--status`, `--limit`, `--cursor`, `--sort`, `--body-format`) | `conf_list_pages` |
-| `conf_get_page_body` | `--page-id` (optional `--body-format`: `storage` / `view` / `atlas_doc_format`) | `conf_get_page_body` |
-| `conf_get_page_tree` | `--page-id` (optional `--limit`, `--depth`) | `conf_get_page_tree` |
-| `conf_search` | `--cql` (optional `--limit`, `--start`, `--excludedContent`) | `conf_search` |
-| `conf_help` | (optional `--topic`) | `conf_help` |
-| `conf_post_markdown` | `--space-id`, `--title`, (`--markdown` *or* `--markdownFile`) | `conf_post_markdown` |
-| `conf_put_markdown` | `--page-id`, (`--title` optional), (`--markdown` *or* `--markdownFile`) | `conf_put_markdown` |
-| `conf_get_page_markdown` | `--page-id` | `conf_get_page_markdown` |
-| `conf_upload_attachment` | `--page-id`, `--file-path` (optional `--comment`, `--minorEdit`) | `conf_upload_attachment` |
-| `conf_list_attachments` | `--page-id` (optional `--cursor`, `--limit`, `--mediaType`, `--filename`) | `conf_list_attachments` |
-| `conf_delete_attachment` | `--attachment-id` (optional `--purge`) | `conf_delete_attachment` |
-| `conf_upload_drawio` | (`--pageId` *or* `--spaceId`+`--title`) + (`--drawioFile` *or* `--drawioPngFile` *or* `--drawioSvgFile`) | `conf_upload_drawio` |
+| `get` | `--path` | `conf_get` |
+| `post` | `--path`, `--body` | `conf_post` |
+| `put` | `--path`, `--body` | `conf_put` |
+| `patch` | `--path`, `--body` (RFC 6902 JSON Patch array) | `conf_patch` |
+| `delete` | `--path` | `conf_delete` |
+| `list_spaces` | (optional `--limit`, `--cursor`, `--type`, `--status`) | `conf_list_spaces` |
+| `list_pages` | `--space-id` *or* `--space-key` (optional `--title`, `--status`, `--limit`, `--cursor`, `--sort`, `--body-format`) | `conf_list_pages` |
+| `get_page_body` | `--page-id` (optional `--body-format`: `storage` / `view` / `atlas_doc_format`) | `conf_get_page_body` |
+| `get_page_tree` | `--page-id` (optional `--limit`, `--depth`) | `conf_get_page_tree` |
+| `search` | `--cql` (optional `--limit`, `--start`, `--excludedContent`) | `conf_search` |
+| `help` | (optional `--topic`) | `conf_help` |
+| `post_markdown` | `--space-id`, `--title`, (`--markdown` *or* `--markdownFile`) | `conf_post_markdown` |
+| `put_markdown` | `--page-id`, (`--title` optional), (`--markdown` *or* `--markdownFile`) | `conf_put_markdown` |
+| `get_page_markdown` | `--page-id` | `conf_get_page_markdown` |
+| `upload_attachment` | `--page-id`, `--file-path` (optional `--comment`, `--minorEdit`) | `conf_upload_attachment` |
+| `list_attachments` | `--page-id` (optional `--cursor`, `--limit`, `--mediaType`, `--filename`) | `conf_list_attachments` |
+| `delete_attachment` | `--attachment-id` (optional `--purge`) | `conf_delete_attachment` |
+| `upload_drawio` | (`--pageId` *or* `--spaceId`+`--title`) + (`--drawioFile` *or* `--drawioPngFile` *or* `--drawioSvgFile`) | `conf_upload_drawio` |
 
 **Why v5 exists (the dev-velocity loop).** Each per-tool
 subcommand is a thin 1:1 shell adapter over the same

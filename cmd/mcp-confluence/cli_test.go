@@ -772,8 +772,8 @@ func TestServe_BindsAndShutsDown(t *testing.T) {
 
 // --- Phase 20 — per-tool CLI subcommands (5 CRUD) -----------------------
 //
-// The five CRUD subcommands (conf_get, conf_post, conf_put, conf_patch,
-// conf_delete) expose the corresponding MCP tool handlers as direct
+// The five CRUD subcommands (get, post, put, patch,
+// delete) expose the corresponding MCP tool handlers as direct
 // cobra subcommands. Each is a thin cobra→Handle* adapter — see
 // cli_tool_dispatch.go and cli_tool_crud.go for the implementation.
 //
@@ -784,6 +784,12 @@ func TestServe_BindsAndShutsDown(t *testing.T) {
 // suite) — Phase 21 will add live-invocation smoke once the
 // remaining 13 subcommands are wired and a make-gated dispatch
 // test is cheap to add.
+//
+// Note on naming: the binary subcommands are unprefixed (`get`,
+// `post`, ...) while the underlying MCP tool names retain the
+// `conf_*` prefix (frozen wire surface). The --topic filter on
+// the `help` subcommand still accepts the `conf_*` MCP tool
+// names — see the long help text for `help`.
 
 // runHelp returns the stdout / stderr buffers from running
 // `./bin/mcp-confluence <args...> --help` in a fresh subprocess.
@@ -805,50 +811,51 @@ func runHelp(t *testing.T, args ...string) (stdout, stderr string) {
 	return so.String(), se.String()
 }
 
-// TestConfGet_Help locks the per-tool help contract for conf_get:
+// TestGet_Help locks the per-tool help contract for the get
+// subcommand (the raw REST pass-through):
 // 0 bytes on stdout (the JSON-RPC channel — preserved across the
 // new dispatch surface), the four anchor sections on stderr, and
 // the auto-registered --path flag lifted from internal/tools.GetArgs.
-func TestConfGet_Help(t *testing.T) {
+func TestGet_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_get")
+	stdout, stderr := runHelp(t, "get")
 	if stdout != "" {
-		t.Errorf("conf_get --help wrote %d bytes to stdout (must be 0): %q", len(stdout), stdout[:min(200, len(stdout))])
+		t.Errorf("get --help wrote %d bytes to stdout (must be 0): %q", len(stdout), stdout[:min(200, len(stdout))])
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
 		"EXAMPLES",
 		"--path",
-		"conf_get",
+		"get",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_get --help stderr missing %q", want)
+			t.Errorf("get --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfGet_HelpMentionsTOONOutput locks the contract that the
+// TestGet_HelpMentionsTOONOutput locks the contract that the
 // default output format is TOON (the load-bearing token-savings
 // claim of the project — see README and the 18 tool handler
 // descriptions). The word "TOON" must appear in --help so an
 // operator using the CLI dispatch surface sees the same default
 // format the JSON-RPC transports emit.
-func TestConfGet_HelpMentionsTOONOutput(t *testing.T) {
+func TestGet_HelpMentionsTOONOutput(t *testing.T) {
 	t.Parallel()
-	_, stderr := runHelp(t, "conf_get")
+	_, stderr := runHelp(t, "get")
 	if !strings.Contains(stderr, "TOON") {
-		t.Errorf("conf_get --help stderr must surface the TOON default output format")
+		t.Errorf("get --help stderr must surface the TOON default output format")
 	}
 }
 
-// TestConfGet_FlagsListed locks the auto-generated FLAGS block.
+// TestGet_FlagsListed locks the auto-generated FLAGS block.
 // Every field on internal/tools.GetArgs (Path, Query, JQ,
 // OutputFormat) must appear in the help text so a CLI operator
 // can discover the surface from --help alone (no separate
 // documentation lookup).
-func TestConfGet_FlagsListed(t *testing.T) {
+func TestGet_FlagsListed(t *testing.T) {
 	t.Parallel()
-	_, stderr := runHelp(t, "conf_get")
+	_, stderr := runHelp(t, "get")
 	for _, want := range []string{
 		"--path",
 		"--query",
@@ -856,22 +863,22 @@ func TestConfGet_FlagsListed(t *testing.T) {
 		"--outputFormat",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_get --help FLAGS block missing %q", want)
+			t.Errorf("get --help FLAGS block missing %q", want)
 		}
 	}
 }
 
-// TestConfPost_Help mirrors TestConfGet_Help with the additional
+// TestPost_Help mirrors TestGet_Help with the additional
 // assertion that --body is listed in the FLAGS block (PostArgs
 // has a Body field; GetArgs does not). The body flag is the
 // load-bearing difference between GET and POST — locking its
 // presence in --help catches a future regression where a struct
 // field is added to PostArgs but the FLAGS section loses it.
-func TestConfPost_Help(t *testing.T) {
+func TestPost_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_post")
+	stdout, stderr := runHelp(t, "post")
 	if stdout != "" {
-		t.Errorf("conf_post --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("post --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -882,19 +889,19 @@ func TestConfPost_Help(t *testing.T) {
 		"--outputFormat",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_post --help stderr missing %q", want)
+			t.Errorf("post --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfPut_Help is the parallel gate for the PUT subcommand.
+// TestPut_Help is the parallel gate for the PUT subcommand.
 // PUT shares the same shape as POST (full-replacement body),
 // so the --body flag must be present.
-func TestConfPut_Help(t *testing.T) {
+func TestPut_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_put")
+	stdout, stderr := runHelp(t, "put")
 	if stdout != "" {
-		t.Errorf("conf_put --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("put --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -905,12 +912,12 @@ func TestConfPut_Help(t *testing.T) {
 		"--outputFormat",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_put --help stderr missing %q", want)
+			t.Errorf("put --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfDelete_Help locks the contract for the DELETE
+// TestDelete_Help locks the contract for the DELETE
 // subcommand. DeleteArgs has NO Body field (DELETE never sends a
 // body), so the --body flag must NOT appear — a regression
 // where a future struct field is auto-registered without a
@@ -919,12 +926,12 @@ func TestConfPut_Help(t *testing.T) {
 //
 // We assert the four expected flags (path / query / jq /
 // outputFormat) and the four anchor sections (HERMES / EXAMPLES
-// / --path / conf_delete) to mirror the GET coverage.
-func TestConfDelete_Help(t *testing.T) {
+// / --path / delete) to mirror the GET coverage.
+func TestDelete_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_delete")
+	stdout, stderr := runHelp(t, "delete")
 	if stdout != "" {
-		t.Errorf("conf_delete --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("delete --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -933,24 +940,24 @@ func TestConfDelete_Help(t *testing.T) {
 		"--query",
 		"--jq",
 		"--outputFormat",
-		"conf_delete",
+		"delete",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_delete --help stderr missing %q", want)
+			t.Errorf("delete --help stderr missing %q", want)
 		}
 	}
 }
 
 // --- Phase 21 — remaining 13 per-tool subcommands ---------------------
 //
-// Phase 20 covered the 5 raw CRUD subcommands (conf_get, conf_post,
-// conf_put, conf_patch, conf_delete). Phase 21 wires the remaining
-// 13 typed wrappers (6 convenience, 3 markdown, 3 attachments, 1
-// drawio). The 13 tests below mirror the Phase 20 pattern: spawn
-// the freshly-built binary's `<subcommand> --help`, assert 0 bytes
-// on stdout, and assert the four anchor sections on stderr
-// (HERMES REGISTRATION / EXAMPLES / the args-struct field name /
-// the subcommand name itself).
+// Phase 20 covered the 5 raw CRUD subcommands (get, post, put,
+// patch, delete). Phase 21 wires the remaining 13 typed wrappers
+// (6 convenience, 3 markdown, 3 attachments, 1 drawio). The 13
+// tests below mirror the Phase 20 pattern: spawn the freshly-
+// built binary's `<subcommand> --help`, assert 0 bytes on stdout,
+// and assert the four anchor sections on stderr (HERMES
+// REGISTRATION / EXAMPLES / the args-struct field name / the
+// subcommand name itself).
 //
 // Every subcommand is asserted on at least one of its args-struct
 // field names (a flag that, if missing, would mean the
@@ -962,16 +969,16 @@ func TestConfDelete_Help(t *testing.T) {
 // future struct addition / removal in internal/tools/ surfaces as
 // a missing/extra flag assertion in the matching test below.
 
-// TestConfListSpaces_Help locks the contract for the typed
+// TestListSpaces_Help locks the contract for the typed
 // list-spaces wrapper. Asserts the args-struct flag --limit
 // (the canonical "sensible-by-default" knob) is listed in
 // --help, and the EXAMPLES section shows the --type=personal
 // invocation the operator is most likely to copy-paste.
-func TestConfListSpaces_Help(t *testing.T) {
+func TestListSpaces_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_list_spaces")
+	stdout, stderr := runHelp(t, "list_spaces")
 	if stdout != "" {
-		t.Errorf("conf_list_spaces --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("list_spaces --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -979,23 +986,23 @@ func TestConfListSpaces_Help(t *testing.T) {
 		"--limit",
 		"--type",
 		"--outputFormat",
-		"conf_list_spaces",
+		"list_spaces",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_list_spaces --help stderr missing %q", want)
+			t.Errorf("list_spaces --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfListPages_Help locks the contract for the typed
+// TestListPages_Help locks the contract for the typed
 // list-pages wrapper. Asserts the args-struct flags --space-id
 // (the recommended filter) and --sort (the optional sort field)
 // are listed in --help.
-func TestConfListPages_Help(t *testing.T) {
+func TestListPages_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_list_pages")
+	stdout, stderr := runHelp(t, "list_pages")
 	if stdout != "" {
-		t.Errorf("conf_list_pages --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("list_pages --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -1003,44 +1010,44 @@ func TestConfListPages_Help(t *testing.T) {
 		"--space-id",
 		"--sort",
 		"--body-format",
-		"conf_list_pages",
+		"list_pages",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_list_pages --help stderr missing %q", want)
+			t.Errorf("list_pages --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfGetPageBody_Help locks the contract for the typed
+// TestGetPageBody_Help locks the contract for the typed
 // get-page-body wrapper. Asserts the required --page-id flag
 // and the --body-format representation selector are listed.
-func TestConfGetPageBody_Help(t *testing.T) {
+func TestGetPageBody_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_get_page_body")
+	stdout, stderr := runHelp(t, "get_page_body")
 	if stdout != "" {
-		t.Errorf("conf_get_page_body --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("get_page_body --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
 		"EXAMPLES",
 		"--page-id",
 		"--body-format",
-		"conf_get_page_body",
+		"get_page_body",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_get_page_body --help stderr missing %q", want)
+			t.Errorf("get_page_body --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfGetPageTree_Help locks the contract for the typed
+// TestGetPageTree_Help locks the contract for the typed
 // get-page-tree wrapper. Asserts the required --page-id flag
 // and the --depth recursion knob are listed.
-func TestConfGetPageTree_Help(t *testing.T) {
+func TestGetPageTree_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_get_page_tree")
+	stdout, stderr := runHelp(t, "get_page_tree")
 	if stdout != "" {
-		t.Errorf("conf_get_page_tree --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("get_page_tree --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -1048,22 +1055,22 @@ func TestConfGetPageTree_Help(t *testing.T) {
 		"--page-id",
 		"--depth",
 		"--limit",
-		"conf_get_page_tree",
+		"get_page_tree",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_get_page_tree --help stderr missing %q", want)
+			t.Errorf("get_page_tree --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfSearch_Help locks the contract for the typed search
+// TestSearch_Help locks the contract for the typed search
 // wrapper. Asserts the required --cql flag and the --limit
 // pagination knob are listed.
-func TestConfSearch_Help(t *testing.T) {
+func TestSearch_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_search")
+	stdout, stderr := runHelp(t, "search")
 	if stdout != "" {
-		t.Errorf("conf_search --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("search --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -1071,46 +1078,46 @@ func TestConfSearch_Help(t *testing.T) {
 		"--cql",
 		"--limit",
 		"--start",
-		"conf_search",
+		"search",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_search --help stderr missing %q", want)
+			t.Errorf("search --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfHelp_Help locks the contract for the typed help
+// TestHelp_Help locks the contract for the typed help
 // wrapper (the "tour of the tool surface" tool). Asserts the
 // --topic filter and the --outputFormat selector are listed.
-func TestConfHelp_Help(t *testing.T) {
+func TestHelp_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_help")
+	stdout, stderr := runHelp(t, "help")
 	if stdout != "" {
-		t.Errorf("conf_help --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("help --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
 		"EXAMPLES",
 		"--topic",
 		"--outputFormat",
-		"conf_help",
+		"help",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_help --help stderr missing %q", want)
+			t.Errorf("help --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfPostMarkdown_Help locks the contract for the typed
+// TestPostMarkdown_Help locks the contract for the typed
 // post-markdown wrapper. Asserts the required --spaceId and
 // --title flags and the --markdown / --markdownFile body
 // selectors are listed (the inline-or-file pick is the
 // load-bearing UX of the markdown tools).
-func TestConfPostMarkdown_Help(t *testing.T) {
+func TestPostMarkdown_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_post_markdown")
+	stdout, stderr := runHelp(t, "post_markdown")
 	if stdout != "" {
-		t.Errorf("conf_post_markdown --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("post_markdown --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -1119,23 +1126,23 @@ func TestConfPostMarkdown_Help(t *testing.T) {
 		"--title",
 		"--markdown",
 		"--markdownFile",
-		"conf_post_markdown",
+		"post_markdown",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_post_markdown --help stderr missing %q", want)
+			t.Errorf("post_markdown --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfPutMarkdown_Help locks the contract for the typed
+// TestPutMarkdown_Help locks the contract for the typed
 // put-markdown wrapper. Asserts the required --pageId flag
 // and the --markdown / --markdownFile body selectors are
 // listed.
-func TestConfPutMarkdown_Help(t *testing.T) {
+func TestPutMarkdown_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_put_markdown")
+	stdout, stderr := runHelp(t, "put_markdown")
 	if stdout != "" {
-		t.Errorf("conf_put_markdown --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("put_markdown --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -1143,45 +1150,45 @@ func TestConfPutMarkdown_Help(t *testing.T) {
 		"--pageId",
 		"--markdown",
 		"--markdownFile",
-		"conf_put_markdown",
+		"put_markdown",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_put_markdown --help stderr missing %q", want)
+			t.Errorf("put_markdown --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfGetPageMarkdown_Help locks the contract for the
+// TestGetPageMarkdown_Help locks the contract for the
 // typed get-page-markdown wrapper. Asserts the required
 // --page-id flag and the --jq filter selector are listed.
-func TestConfGetPageMarkdown_Help(t *testing.T) {
+func TestGetPageMarkdown_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_get_page_markdown")
+	stdout, stderr := runHelp(t, "get_page_markdown")
 	if stdout != "" {
-		t.Errorf("conf_get_page_markdown --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("get_page_markdown --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
 		"EXAMPLES",
 		"--page-id",
 		"--jq",
-		"conf_get_page_markdown",
+		"get_page_markdown",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_get_page_markdown --help stderr missing %q", want)
+			t.Errorf("get_page_markdown --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfUploadAttachment_Help locks the contract for the
+// TestUploadAttachment_Help locks the contract for the
 // upload-attachment wrapper. Asserts the required --pageId
 // and --filePath flags (the absolute-path file picker is the
 // load-bearing UX of the upload tool) are listed.
-func TestConfUploadAttachment_Help(t *testing.T) {
+func TestUploadAttachment_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_upload_attachment")
+	stdout, stderr := runHelp(t, "upload_attachment")
 	if stdout != "" {
-		t.Errorf("conf_upload_attachment --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("upload_attachment --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -1189,23 +1196,23 @@ func TestConfUploadAttachment_Help(t *testing.T) {
 		"--pageId",
 		"--filePath",
 		"--comment",
-		"conf_upload_attachment",
+		"upload_attachment",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_upload_attachment --help stderr missing %q", want)
+			t.Errorf("upload_attachment --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfListAttachments_Help locks the contract for the
+// TestListAttachments_Help locks the contract for the
 // list-attachments wrapper. Asserts the required --pageId
 // flag and the --mediaType / --filename filter selectors are
 // listed.
-func TestConfListAttachments_Help(t *testing.T) {
+func TestListAttachments_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_list_attachments")
+	stdout, stderr := runHelp(t, "list_attachments")
 	if stdout != "" {
-		t.Errorf("conf_list_attachments --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("list_attachments --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -1213,48 +1220,48 @@ func TestConfListAttachments_Help(t *testing.T) {
 		"--pageId",
 		"--mediaType",
 		"--filename",
-		"conf_list_attachments",
+		"list_attachments",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_list_attachments --help stderr missing %q", want)
+			t.Errorf("list_attachments --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfDeleteAttachment_Help locks the contract for the
+// TestDeleteAttachment_Help locks the contract for the
 // delete-attachment wrapper. Asserts the required --attachmentId
 // flag and the --purge "permanent delete" selector are listed.
-func TestConfDeleteAttachment_Help(t *testing.T) {
+func TestDeleteAttachment_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_delete_attachment")
+	stdout, stderr := runHelp(t, "delete_attachment")
 	if stdout != "" {
-		t.Errorf("conf_delete_attachment --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("delete_attachment --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
 		"EXAMPLES",
 		"--attachmentId",
 		"--purge",
-		"conf_delete_attachment",
+		"delete_attachment",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_delete_attachment --help stderr missing %q", want)
+			t.Errorf("delete_attachment --help stderr missing %q", want)
 		}
 	}
 }
 
-// TestConfUploadDrawio_Help locks the contract for the
+// TestUploadDrawio_Help locks the contract for the
 // upload-drawio wrapper (the most complex of the 18
 // subcommands). Asserts the three input-mode flags
 // (--drawioFile, --drawioPngFile, --drawioSvgFile) and the
 // two target-mode flags (--pageId, --spaceId) are listed —
 // a future regression that drops one of these would
 // surface here as a missing flag in the help text.
-func TestConfUploadDrawio_Help(t *testing.T) {
+func TestUploadDrawio_Help(t *testing.T) {
 	t.Parallel()
-	stdout, stderr := runHelp(t, "conf_upload_drawio")
+	stdout, stderr := runHelp(t, "upload_drawio")
 	if stdout != "" {
-		t.Errorf("conf_upload_drawio --help wrote %d bytes to stdout (must be 0)", len(stdout))
+		t.Errorf("upload_drawio --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
 		"HERMES REGISTRATION",
@@ -1264,10 +1271,10 @@ func TestConfUploadDrawio_Help(t *testing.T) {
 		"--drawioFile",
 		"--drawioPngFile",
 		"--drawioSvgFile",
-		"conf_upload_drawio",
+		"upload_drawio",
 	} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("conf_upload_drawio --help stderr missing %q", want)
+			t.Errorf("upload_drawio --help stderr missing %q", want)
 		}
 	}
 }
@@ -1278,7 +1285,7 @@ func TestConfUploadDrawio_Help(t *testing.T) {
 // The test runs `./bin/mcp-confluence --help` and parses the
 // COMMANDS section — cobra prints the registered subcommands in
 // the Available Commands block, one per line, prefixed with two
-// spaces. We assert all 18 conf_* names appear alongside stdio,
+// spaces. We assert all 18 unprefixed names appear alongside stdio,
 // serve, help, and completion (the system commands cobra adds
 // by default).
 //
@@ -1287,6 +1294,10 @@ func TestConfUploadDrawio_Help(t *testing.T) {
 // forgets to wire its AddCommand in newRootCmd, this test
 // catches it; conversely, if a factory is wired but a
 // subsequent commit removes it, this test catches that too.
+//
+// Note: the binary subcommand names are unprefixed (`get`,
+// `post`, ...). The underlying MCP tool names retain the
+// `conf_*` prefix (frozen wire surface) — see internal/tools/.
 func TestAllEighteenToolSubcommandsExist(t *testing.T) {
 	t.Parallel()
 	bin := binaryPath(t)
@@ -1307,23 +1318,23 @@ func TestAllEighteenToolSubcommandsExist(t *testing.T) {
 		t.Errorf("--help wrote %d bytes to stdout (must be 0)", stdout.Len())
 	}
 
-	// All 18 conf_* subcommand names + the 4 system commands
+	// All 18 subcommand names + the 4 system commands
 	// (stdio / serve / help / completion). The 18 are the
 	// load-bearing surface — the 4 are cobra's default
 	// automatic additions. Every one of the 22 must be
 	// present in the COMMANDS block of --help.
 	required := []string{
 		// 5 CRUD (Phase 20)
-		"conf_get", "conf_post", "conf_put", "conf_patch", "conf_delete",
+		"get", "post", "put", "patch", "delete",
 		// 6 convenience (Phase 21)
-		"conf_list_spaces", "conf_list_pages", "conf_get_page_body",
-		"conf_get_page_tree", "conf_search", "conf_help",
+		"list_spaces", "list_pages", "get_page_body",
+		"get_page_tree", "search", "help",
 		// 3 markdown (Phase 21)
-		"conf_post_markdown", "conf_put_markdown", "conf_get_page_markdown",
+		"post_markdown", "put_markdown", "get_page_markdown",
 		// 3 attachments (Phase 21)
-		"conf_upload_attachment", "conf_list_attachments", "conf_delete_attachment",
+		"upload_attachment", "list_attachments", "delete_attachment",
 		// 1 drawio (Phase 21)
-		"conf_upload_drawio",
+		"upload_drawio",
 		// 4 system / transport subcommands
 		"stdio", "serve", "help", "completion",
 	}
@@ -1333,7 +1344,7 @@ func TestAllEighteenToolSubcommandsExist(t *testing.T) {
 		// anchor on the leading "  <name> " pattern
 		// (with trailing space) to avoid false-positive
 		// matches on, e.g., a help line that happens to
-		// contain the word "conf_get" in prose.
+		// contain the word "get" in prose.
 		needle := "  " + name + " "
 		if !strings.Contains(stderr.String(), needle) {
 			t.Errorf("--help COMMANDS section missing %q (looked for leading-whitespace anchor %q)", name, needle)
@@ -1341,29 +1352,29 @@ func TestAllEighteenToolSubcommandsExist(t *testing.T) {
 	}
 }
 
-// TestConfGet_EndToEndLiveInvocation is the load-bearing integration
+// TestGet_EndToEndLiveInvocation is the load-bearing integration
 // proof for v5 Phase 22: every per-tool CLI subcommand can be invoked
 // directly from the shell and returns the same shape the stdio / HTTP
-// transports emit. This test exercises the read path (conf_get +
-// conf_list_spaces) against the user's smartergroup workspace — the
+// transports emit. This test exercises the read path (get +
+// list_spaces) against the user's smartergroup workspace — the
 // live Confluence API. It is GATED on the ATLASSIAN_API_TOKEN env var
 // being set in the test process; if absent, the test is skipped
 // (the unit-level structural tests above already prove the wiring).
 //
-// Why conf_get + conf_list_spaces: these two are the lowest-cost live
+// Why get + list_spaces: these two are the lowest-cost live
 // invocations (no body, no file, no page-mutation). If either fails,
 // every other tool's CLI dispatch is broken too — the wiring is
 // shared. The remaining 16 subcommands use the same code path; if
 // these two pass, the rest work by construction.
-func TestConfGet_EndToEndLiveInvocation(t *testing.T) {
+func TestGet_EndToEndLiveInvocation(t *testing.T) {
 	token := os.Getenv("ATLASSIAN_API_TOKEN")
 	if token == "" {
 		t.Skip("ATLASSIAN_API_TOKEN not set in test env — skipping live invocation smoke")
 	}
 	bin := binaryPath(t)
 
-	// Case 1: raw REST pass-through via conf_get.
-	cmd := exec.Command(bin, "conf_get",
+	// Case 1: raw REST pass-through via the get subcommand.
+	cmd := exec.Command(bin, "get",
 		"--site=smartergroup",
 		"--email=bennie@obsidian.co.za",
 		"--api-token="+token,
@@ -1373,26 +1384,26 @@ func TestConfGet_EndToEndLiveInvocation(t *testing.T) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("conf_get live invocation failed: %v\nstderr:\n%s", err, stderr.String())
+		t.Fatalf("get live invocation failed: %v\nstderr:\n%s", err, stderr.String())
 	}
 	// TOON output should contain the canonical `_links:` and `results:`
 	// markers for a v2 spaces response. (We don't parse — we just assert
 	// the shape is non-empty + has the load-bearing keys.)
 	if stdout.Len() < 50 {
-		t.Errorf("conf_get live output too short (%d bytes); expected TOON-encoded spaces list:\n%s", stdout.Len(), stdout.String())
+		t.Errorf("get live output too short (%d bytes); expected TOON-encoded spaces list:\n%s", stdout.Len(), stdout.String())
 	}
 	// TOON output for an array uses indexed keys (results[2]:) — accept
 	// either the indexed form or a generic results marker so the test
 	// is robust to TOON-format changes (the v0 wire shape uses arrays).
 	for _, want := range []string{"_links:", "results["} {
 		if !strings.Contains(stdout.String(), want) {
-			t.Errorf("conf_get live output missing %q; full output:\n%s", want, stdout.String())
+			t.Errorf("get live output missing %q; full output:\n%s", want, stdout.String())
 		}
 	}
 
-	// Case 2: typed wrapper via conf_list_spaces (the same data via a
+	// Case 2: typed wrapper via list_spaces (the same data via a
 	// different code path — HandleListSpaces, not HandleGet).
-	cmd2 := exec.Command(bin, "conf_list_spaces",
+	cmd2 := exec.Command(bin, "list_spaces",
 		"--site=smartergroup",
 		"--email=bennie@obsidian.co.za",
 		"--api-token="+token,
@@ -1403,12 +1414,12 @@ func TestConfGet_EndToEndLiveInvocation(t *testing.T) {
 	cmd2.Stdout = &stdout
 	cmd2.Stderr = &stderr
 	if err := cmd2.Run(); err != nil {
-		t.Fatalf("conf_list_spaces live invocation failed: %v\nstderr:\n%s", err, stderr.String())
+		t.Fatalf("list_spaces live invocation failed: %v\nstderr:\n%s", err, stderr.String())
 	}
 	if stdout.Len() < 50 {
-		t.Errorf("conf_list_spaces live output too short (%d bytes)", stdout.Len())
+		t.Errorf("list_spaces live output too short (%d bytes)", stdout.Len())
 	}
 	if !strings.Contains(stdout.String(), "results[") {
-		t.Errorf("conf_list_spaces live output missing %q:\n%s", "results[", stdout.String())
+		t.Errorf("list_spaces live output missing %q:\n%s", "results[", stdout.String())
 	}
 }

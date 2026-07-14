@@ -1738,13 +1738,21 @@ becomes:
 
 ```
 make build
-./bin/mcp-confluence conf_get --path=/wiki/api/v2/spaces?limit=2
+./bin/mcp-confluence get --path=/wiki/api/v2/spaces?limit=2
 ```
 
 No Hermes restart. No `curl` + JSON-RPC envelope. No
 `hermes mcp test confluence` round-trip. The terminal is
 the dev loop; Hermes registration stays the final
 integration smoke (already verified in Phase 19).
+
+> **v6 unprefixed rename (2026-07-14, follow-up):** The
+> per-tool subcommand names are unprefixed in the binary
+> (`get`, `post`, ..., `upload_drawio`) — the `conf_` prefix
+> was dropped from the shell-invocation surface. The
+> underlying MCP tool names (`mcp__confluence_conf_get` etc.)
+> are frozen and unchanged. See the v6 retrospective at the
+> end of this section.
 
 **Spec set:** no new specs folder. The v5 plan builds on
 the v4 spec set
@@ -1904,8 +1912,8 @@ now:
 
 ```
 make build
-./bin/mcp-confluence conf_get --path=/wiki/api/v2/spaces?limit=2
-./bin/mcp-confluence conf_get_page_markdown --pageId=163935 | jq .markdown
+./bin/mcp-confluence get --path=/wiki/api/v2/spaces?limit=2
+./bin/mcp-confluence get_page_markdown --pageId=163935 | jq .markdown
 ```
 
 No Hermes restart. No JSON-RPC envelope. No
