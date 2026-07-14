@@ -1155,17 +1155,19 @@ Append a bullet after each phase:
 - 2026-07-09 — Plan complete: 174 boxes checked, 0 unchecked. All 12 implementation phases + Phase 0 bootstrap landed.
 - 2026-07-09 — Phase 7: 5 handlers + safeHandler + RegisterAll + NewServer — sha=`97542e2`. three commits (97542e2/86e0500/69cf7a5): handlers → RegisterAll → main.go lifecycle. New transport-trampoline pattern (NewWithTransport + pipe-backed stdio) lets main.go detect stdin EOF for clean shutdown. 9 internal/tools tests pass.
 - 2026-07-09 — Phase 10: smoke-test fixes — sha=`b85ea84`. make format/lint/test/check all green; end-to-end JSON-RPC smoke against real Confluence API returns TOON-encoded `/wiki/api/v2/spaces?limit=2` with real space data (smartergroup.atlassian.net). Two bugs found and fixed: (1) atlassian.New was building `https://<site>` instead of `https://<site>.atlassian.net` (violated Q22-locked settings contract); (2) buildURL was URL-encoding `?` inside the path. New tests: TestBuildURL_PathContainsQuery + TestBuildURL_PathAndQueryMerged.
-- 2026-07-09 — Phase 11: Paketo project.toml + make image pipeline — sha=`c14cc90`. Confluence MCP server is now packaged as a distroless OCI image via `pack build` + Paketo Go BuildPak. `make image` green; `make image-inspect` shows base layers (tiny + Go BuildPak + Paketo run + app).
+| 2026-07-09 — Phase 11: Paketo project.toml + make image pipeline — sha=`c14cc90`. Confluence MCP server is now packaged as a distroless OCI image via `pack build` + Paketo Go BuildPak. `make image` green; `make image-inspect` shows base layers (tiny + Go BuildPak + Paketo run + app).
 - 2026-07-09 — Phase 12: Hermes integration — sha=N/A (no commit, user maintains their own config repo). 5/5 tools register (`conf_get/post/put/patch/delete`); `conf_get /wiki/api/v2/spaces?limit=2` returns TOON-encoded real data ("Grant Bingham" personal space, status=current, type=personal). Three `${ATLASSIAN_*}` env vars in `~/.hermes/config.yaml` (zero literal credentials — `grep ATATT` returns 0 hits). Backup at `~/.hermes/backups/config.20260709_184533.yaml`. Hit a hidden argparse bug: `hermes mcp add --env A --env B --env C` with `nargs="*"` keeps ONLY the last `--env` value — must pass all values as space-separated args to a single `--env` flag. Resolved by reissuing with `--env A B C` in one flag.
 - 2026-07-09 — Plan complete: 174 boxes checked, 0 unchecked. All 12 implementation phases + Phase 0 bootstrap landed.
 - 2026-07-10 — Post-v1 audit closure: explicit `jsonschema:"description=..."` tags on every field of every args struct (`dca7f0c`) + 5 quality-of-life tools (`conf_list_spaces`, `conf_list_pages`, `conf_get_page_body`, `conf_search`, `conf_help`). Server registration widened from 5 to 10 tools. `make check` green; `hermes mcp test confluence` discovers 10.
+- 2026-07-13 — v3 attachments: binary upload/download/list via v1+v2 REST split. 3 new tools (`conf_upload_attachment`, `conf_list_attachments`, `conf_delete_attachment`). `make build` + 2 new packages.
+- 2026-07-13 — v3 drawio: `conf_upload_drawio` orchestrator; upload + page-body edit in one call. macro envelope shape documented.
+- 2026-07-14 — v1.x page-tree index: `conf_get_page_tree` (3-endpoint orchestrator). 18 tools in `expectedTools`; `TestNew_RegistersAll{Eighteen,ExactlyEighteen}Tools` rename. `make test` green (163 funcs); live smoke returned 6 children + 25 descendants against `bennie` workspace page `780764253`.
+- 2026-07-14 — Per-line agent instruction (today): refactor the binary into a CLI app. Rationale from the user: *"having the mcp server as an cli app excercising the same code as the MCP server will speed up the development as I do not need to restart hermes every time for tests, but only for the MCP tests"*. So the dev loop becomes: rebuild bin, run `./bin/mcp-confluence --help` or `./bin/mcp-confluence serve --listen=…` from the terminal, observe stderr + return values directly. Hermes integration becomes the **final** integration smoke, not the primary dev loop. The deliverable is 4 new phases (16-19) below — see the **v4 — CLI refactor + dual transport** section.
 
 ---
-
 ## Done when
 
-The plan is complete when:
-
+The v1 plan was complete when:
 - [x] All 12 implementation phases are checked off in **§ Progress index**
 - [x] `make check` exits 0
 - [x] `make image` produces a working OCI image
@@ -1173,6 +1175,15 @@ The plan is complete when:
 - [x] An end-to-end `conf_get` call returns real Confluence data in TOON format
 - [x] The README at the project root links to this plan and to `specs/`
 - [x] Every **§ Cross-phase guarantees** checkbox is flipped
+
+The **current v4 plan** (Phases 16-19) is complete when:
+- [ ] `mcp-confluence --help` exits 0 with text on **stderr** (zero stdout pollution)
+- [ ] `mcp-confluence stdio` produces byte-identical behaviour to the v0.1 binary (confirmed via `scripts/smoke-page_tree.py`)
+- [ ] `mcp-confluence serve --listen=127.0.0.1:8080` accepts a `curl -X POST` JSON-RPC request and returns a TOON response from a real `conf_get` call
+- [ ] Every subcommand's `--help` text contains a `HERMES REGISTRATION` YAML example (load-bearing for Hermes MCP-host config; tested closed in `cli_test.go`)
+- [ ] `cli_test.go::TestHelp_ForEachSubcommand_HasHermesRegistration` is green
+- [ ] Hermes smoke (final integration): `hermes mcp test confluence` discovers 18 tools via the new `stdio` mode **and** Hermes can also reach the `serve` mode via `args: ["serve", "--listen=…"]`
+- [ ] All 22+ existing boxes above still pass (no regression — same tool surface, same tools, same handlers, same wire format on both transports)
 
 ---
 
@@ -1218,3 +1229,470 @@ working tree). The full record lives at
   full root-cause.
 - Build, lint, image, deploy, registration — all unchanged
   from Phase 12.
+
+---
+
+## v4 — CLI refactor + dual transport (2026-07-14, in progress)
+
+> **User's 2026-07-14 instruction (verbatim):** *"add all the
+> subcommands to AGENTS.md and especially add `serve` to run the
+> software as an MCP server. make sure the `--help` root command
+> option and each subcommand `--help` options will show hermes how
+> to configure itself to use any subcommand and especially the
+> `serve` command for running as an MCP server. Then update
+> AGENTS.md to describe confluence-mcp as an cli app"*
+>
+> **Dev-velocity rationale (verbatim):** *"having the mcp server as
+> an cli app excercising the same code as the MCP server will
+> speed up the development as I do not need to restart hermes every
+> time for tests, but only for the MCP tests."*
+
+The current binary (`bin/mcp-confluence`) hard-codes stdio JSON-RPC
+via `metoro-io/mcp-golang`'s `stdio.NewStdioServerTransportWithIO`.
+Dev-loop shape today: rebuild → restart Hermes
+(or run via `hermes mcp test confluence`) → stdio pipe established
+→ call tools. Any code change forces a Hermes restart, which is
+expensive.
+
+**This refactor adds a CLI surface on top of the existing
+server.** The 18 tools, the `internal/tools` package, and the
+9-step `executeRequest` pipeline stay byte-identical. What changes
+is the **transport dispatch** in `cmd/mcp-confluence/main.go`:
+
+| Subcommand | Transport | Wire format | Use case |
+| ---------- | --------- | ----------- | -------- |
+| `stdio` (default) | `os.Stdin`/`os.Stdout` | newline-delimited JSON-RPC | Hermes MCP-host pipe |
+| `serve` | `net/http` server | HTTP `POST /mcp` body = JSON-RPC | LAN dev, docker container with port-bind, future TLS via reverse proxy |
+| `--help`, `--version` | n/a | n/a | parse-and-exit; help text → stderr |
+
+Key architecture decision: **both transports run the SAME
+`mcp.Server` instance built by `server.New(deps)`** — only the
+framing differs. The `server.NewWithTransport` already exists
+(`internal/server/server.go:48`); we'll add a third mode that
+calls it once and exposes a `ServeHTTP(req)` shim that wraps
+each HTTP request into a single JSON-RPC request handled by
+`srv.Handle(ctx, json.RawMessage) (json.RawMessage, error)`.
+
+**Why a v4 (not v1.5):** the
+`specs/14-cobra-viper-golang/` research doc (committed
+2026-07-14) is now the canonical reference for the CLI add.
+Two new dependencies land:
+
+- `github.com/spf13/cobra v1.10.2` — subcommand + flag parser
+- `github.com/spf13/viper v1.21.0` — flag ⇄ env ⇄ config-file
+  precedence
+
+**Locked decisions (per the user's 2026-07-14 answers):**
+- `--api-token` (matches `ATLASSIAN_API_TOKEN` env name; matches
+  the upstream Node tool's flag name)
+- No `version` subcommand; only the cobra-default `--version` flag
+- Edit `cmd/mcp-confluence/main.go` directly; no sibling `cli.go`
+- Keep `internal/config/dotenv.go` (Q22-locked) verbatim — the
+  CLI composition path re-injects flags into `os.Setenv` so the
+  stdlib parser remains authoritative
+
+**Spec set:** `specs/14-cobra-viper-golang/` (3 files:
+01-research-and-surface.md + 02-design.md + research/
+subfolder). Plus the **new** `internal/transport/http/` Go
+package, documented inline.
+
+**Phases 16 and 17 are sequential (cobra/viper first, then the
+stdio subcommand that consumes it). Phase 18 is the new TCP/HTTP
+transport. Phase 19 is the Hermes MCP-host smoke + the live
+JSON-RPC over curl test that proves the dev-loop velocity
+argument.**
+
+- [ ] **Phase 16** — cobra + viper scaffolding in `cmd/mcp-confluence/main.go`; flag handlers; `cli_test.go::TestRoot_Help` + `TestVersion`; `make build` green; **no behavior change yet** (binary still does exactly what it does today when run with `args: []`).
+
+- [ ] **Phase 17** — `mcp-confluence stdio` subcommand dispatch; verify byte-identical behaviour via `scripts/smoke-page_tree.py`; flags override env vars per Q22 composition path; `cli_test.go::TestStdio_Help` + `TestStdio_FlagsOverrideEnv`.
+
+- [ ] **Phase 18** — `mcp-confluence serve` subcommand + new `internal/transport/http/` package; `POST /mcp` JSON-RPC bridge to the SAME `mcp.Server` instance; `--listen=127.0.0.1:8080` default with fails-closed bind; `cli_test.go::TestServe_*` (incl. live `curl -X POST http://127.0.0.1:8080/mcp -d '…'` + assertion on the response payload).
+
+- [ ] **Phase 19** — Final integration smoke + Hermes MCP-host config example with both stdio and serve transport invocations; AGENTS.md and Makefile synced (already done at `aac804c` — confirming via `make test`); `make image` rebuilds the distroless binary with the CLI surface baked in; `make check` green.
+
+---
+
+## Phase 16 — cobra + viper scaffolding (no behavior change)
+
+**Token budget:** ~256k soft · **Subagent:** yes · **Parallel-safe:** no
+
+**Objective:** Add `github.com/spf13/cobra v1.10.2` and
+`github.com/spf13/viper v1.21.0` to `go.mod`; extract a
+`newRootCmd()` function from `cmd/mcp-confluence/main.go` that
+defines the root command (with `stdio`, `serve`, `help`,
+`--help`, `--version` as no-op placeholders for Phases 17-18);
+wire the 6 persistent flags (`--site`, `--email`,
+`--api-token`, `--debug`, `--config`) via viper's
+`BindPFlag` + `SetEnvPrefix("ATLASSIAN")` + `AutomaticEnv()`.
+The `SetOut(io.Discard)` + `SetErr(os.Stderr)` discipline
+established at `cmd/mcp-confluence/main.go` is preserved. End
+state of Phase 16: `./bin/mcp-confluence --help` returns help
+text to stderr; running the binary with `args: []` produces
+the SAME behaviour as v0.1 (stdio JSON-RPC); running with
+`args: ["stdio"]` produces the same behaviour too (still
+dispatches to `runLifecycle`).
+
+**Tasks**
+
+- [ ] `go get github.com/spf13/cobra@v1.10.2 github.com/spf13/viper@v1.21.0` (run via `make install`, not directly)
+- [ ] In `cmd/mcp-confluence/main.go`: replace `func main() { run() }` with a cobra-dispatched `func main() { newRootCmd().Execute() }`. Keep `run()`, `runLifecycle()`, `serveUntilDone()`, `wireStdinEOF` UNCHANGED — they are called from `RunE`/`Run` closures inside the new subcommand builder.
+- [ ] In the same file: define `func newRootCmd() *cobra.Command`. Persistent flag definitions (site, email, api-token, debug, config) on the root. `--help` and `--version` flag definitions are added by cobra automatically when we set `rootCmd.Version = version`.
+- [ ] `rootCmd.SetOut(io.Discard)` + `rootCmd.SetErr(os.Stderr)` BEFORE `Execute()`. **Load-bearing for JSON-RPC stdout invariant.**
+- [ ] Add `func newStdioCmd()` + `func newServeCmd()` as thin subcommand factories. For Phase 16, both are STUBS — they call `run()` for the full lifecycle, ignoring subcommand-specific behavior. The transports dispatch lands in Phases 17 (stdio: behavior-preserving) and 18 (serve: net/http).
+- [ ] Wire viper in a `func initViper(root *cobra.Command)` that:
+  1. Creates `viper.New()`
+  2. `viper.SetEnvPrefix("ATLASSIAN")` + `viper.AutomaticEnv()`
+  3. `viper.BindEnv(...)` for each of the 5 persistent flag names → specific env-var paths (so `--site` ↔ `ATLASSIAN_SITE_NAME`, etc.)
+  4. `viper.BindPFlag(...)` for each flag, called AFTER the flag is registered (the standard viper gotcha)
+- [ ] Add the cobra-generated `--help` text to ROOT/SUBCOMMAND templates manually (cobra defaults are too terse for a Hermes-host config doc). Each help block must contain `HERMES REGISTRATION:` + a verbatim YAML example using the binary's actual flags.
+- [ ] New file `cmd/mcp-confluence/cli_test.go`. First two tests:
+  - `TestRoot_Help` — captures stderr from `--help`, asserts the help text contains the strings "USAGE:", "FLAGS:", "ENV VARS:", "HERMES INTEGRATION — stdio mode:", "HERMES INTEGRATION — serve (TCP/HTTP) mode:".
+  - `TestVersion` — captures stderr from `--version`, asserts the version string (`v0.1.0` today; settable via `-ldflags -X main.version=…`).
+- [ ] Update `cmd/mcp-confluence/main.go` `const version = "v0.1.0"` at line 54 to be sourced from `main.version` build-linkable variable (already does this for `make image`).
+
+**Spec to follow:** `specs/14-cobra-viper-golang/01-research-and-surface.md`
+(§3 canonical pattern, §4 critical gotchas, §5 the three
+options and the Option-B recommendation) and
+`02-design.md` (§6 reference implementation, §9 hard invariants).
+
+**Locked behaviours to preserve:**
+- The `confluence.DotenvParse` ordering (process env > cwd .env > binary-dir .env) is **unchanged**. The CLI composition path (`os.Setenv("ATLASSIAN_SITE_NAME", site)` from inside `runServer`) feeds flags into the top tier of Q22 — the stdlib parser still does the cwd/binary-dir lookups.
+- The 18-tool surface is byte-identical (the registration entrypoint `tools.RegisterAll(srv, client)` is shared across both subcommands and `--help` is parse-and-exit).
+- The five CRUD tool descriptions remain verbatim from upstream.
+
+**Verification**
+
+- [ ] `go.mod` has cobra v1.10.2 + viper v1.21.0 as direct deps
+- [ ] `make build` produces the same binary path (`bin/mcp-confluence`); CGO_ENABLED=0 preserved
+- [ ] `./bin/mcp-confluence --help </dev/null | head -1` returns **empty** (zero stdout writes)
+- [ ] `./bin/mcp-confluence --help 2>&1 | grep "HERMES INTEGRATION"` returns at least 2 lines (stdio + serve)
+- [ ] `./bin/mcp-confluence --version 2>&1` prints `mcp-confluence version v0.1.0`
+- [ ] `./bin/mcp-confluence </dev/null` (no args) produces the v0.1 behaviour: startup banner on stderr, then blocks reading JSON-RPC from stdin (EOF cancels)
+- [ ] `make test` is green; `make check` (lint + test) is green
+- [ ] No `fmt.Println` calls in `cmd/` or `internal/` (existing grep invariant)
+
+**Kickoff prompt body** (publish to `phase-16-prompt`):
+
+```
+You are implementing Phase 16 of the mcp-confluence plan — the
+cobra + viper scaffolding. Read IMPLEMENTATION_PLAN.md, then
+specs/14-cobra-viper-golang/01-research-and-surface.md (especially
+§3 canonical pattern and §5 the three options), then
+specs/14-cobra-viper-golang/02-design.md (especially §6 reference
+implementation).
+
+OBJECTIVE: Add cobra v1.10.2 + viper v1.21.0. Rewrite
+cmd/mcp-confluence/main.go so func main() calls
+newRootCmd().Execute(). Keep run(), runLifecycle(),
+serveUntilDone(), wireStdinEOF() UNCHANGED. The persistent
+flags are --site, --email, --api-token, --debug, --config (Q22
+composition path). Add the cobra-generated --help text manually
+(too terse by default). Add cli_test.go with TestRoot_Help and
+TestVersion.
+
+CONSTRAINT: rootCmd.SetOut(io.Discard) + SetErr(os.Stderr) MUST
+be set before Execute() — this is the load-bearing JSON-RPC
+stdout-protection invariant. NO fmt.Println anywhere.
+
+DONE WHEN: make build + make test are green. ./bin/mcp-confluence
+--help writes multi-section help text to stderr (no stdout).
+./bin/mcp-confluence --version prints mcp-confluence version
+v0.1.0. /bin/mcp-confluence with no args still blocks on stdin
+EOF (behaviour-preserving). Report commit SHA + summary on
+phase-16-done.
+```
+
+---
+
+## Phase 17 — `stdio` subcommand dispatch (behaviour-preserving)
+
+**Token budget:** ~128k soft · **Subagent:** yes · **Parallel-safe:** no
+(depends on Phase 16's viper wiring)
+
+**Objective:** Make `mcp-confluence stdio` an explicit
+subcommand that produces byte-identical behaviour to the v0.1
+binary's default invocation. Verify with the existing
+`scripts/smoke-page_tree.py` that the live JSON-RPC stream is
+unchanged. Add flag-override-env tests in `cli_test.go`.
+
+**Tasks**
+
+- [ ] `func newStdioCmd()` (in `cmd/mcp-confluence/main.go`):
+  exactly delegate to the v0.1 lifecycle. Reads the merged
+  viper picture (flag > env > config file), re-injects the
+  relevant values into `os.Setenv`, then calls `run()`. The
+  Q22 composition path keeps `internal/config/dotenv.go`
+  authoritative for cwd/binary-dir .env.
+- [ ] Print confirmation log on stderr: `mcp-confluence v0.1.0 starting (site=<site>, email=<email>)` — same one-liner the v0.1 binary already prints, so existing log-parsing isn't disrupted.
+- [ ] `cli_test.go::TestStdio_Help` — assert stdio `--help` contains the HERMES REGISTRATION block for stdio mode (full YAML example).
+- [ ] `cli_test.go::TestStdio_FlagsOverrideEnv` — spawn the binary with `args: ["stdio", "--site=forcedSite", "--email=forced@example.com"]` while `ATLASSIAN_SITE_NAME=envSite` is set in the subprocess env. Verify the spawned binary's stderr says `site=forcedSite` (flag wins). Then the inverse: same test with no `--site` flag, verify stderr says `site=envSite` (env wins).
+- [ ] `cli_test.go::TestStdio_NoEnvFailsFast` — spawn with `args: ["stdio"]`, no env, no `.env` on disk. The binary must exit with `os.Exit(1)` and stderr must contain `FATAL: ATLASSIAN_SITE_NAME is not set` (or the equivalent — be lenient on the exact phrasing, check for FATAL).
+
+**Spec to follow:** `specs/14-cobra-viper-golang/02-design.md` §6
+"Reference implementation outline" + §8 "Hard invariants".
+
+**Verification**
+
+- [ ] `scripts/smoke-page_tree.py` returns the same merged-envelope JSON for page-id `1831108680` (1 ancestor) and `780764253` (6 children, 25 descendants) as the v0.1 binary produced 2026-07-14
+- [ ] `cli_test.go::TestStdio_Help`, `TestStdio_FlagsOverrideEnv`, `TestStdio_NoEnvFailsFast` are green
+- [ ] `make check` is green
+- [ ] `./bin/mcp-confluence stdio` with `--help` writes stdio-specific help to stderr (with HERMES REGISTRATION block)
+- [ ] The Hermes-registered confluence server (after the user does the `hermes mcp test confluence` refresh) still works with `args: ["stdio"]` (today it's `args: []`; after Phase 17 the user's `~/.hermes/config.yaml` would be unchanged because `args: []` and `args: ["stdio"]` produce identical behaviour)
+
+**Kickoff prompt body** (publish to `phase-17-prompt`):
+
+```
+You are implementing Phase 17 of the mcp-confluence plan. Read
+IMPLEMENTATION_PLAN.md, then the Phase 17 entry. OBJECTIVE:
+stdio subcommand dispatch — behaviour-preserving. Run `make
+check` after each commit. Keep run(), runLifecycle(),
+serveUntilDone(), wireStdinEOF UNCHANGED. Add TestStdio_Help,
+TestStdio_FlagsOverrideEnv, TestStdio_NoEnvFailsFast to
+cli_test.go. Live-verify with `python3 scripts/smoke-page_tree.py`
+— the response envelope must be byte-identical to yesterday's
+v0.1 smoke (page 1831108680 returns ancestors=1, page 780764253
+returns children=6 descendants=25). Report commit SHA + smoke
+result on phase-17-done.
+```
+
+---
+
+## Phase 18 — `serve` subcommand + `internal/transport/http/` package (new code)
+
+**Token budget:** ~256k soft · **Subagent:** yes · **Parallel-safe:** no
+(depends on Phases 16-17; introduces the new transport package)
+
+**Objective:** Add a TCP/HTTP transport under `serve`. Listens on
+`--listen=127.0.0.1:8080` by default. Each `POST /mcp` HTTP
+request is dispatched to the SAME `mcp.Server` instance built by
+`internal/server.NewWithTransport` — only the framing changes.
+No new tool registrations, no new dependencies, no new business
+logic in `internal/tools`. This unblocks the user's dev-velocity
+argument: rebuild + `./bin/mcp-confluence serve --listen=...` from
+the terminal now serves the same 18 tools over HTTP, no Hermes
+restart required for the 90% of dev iterations that don't touch
+the MCP framing.
+
+**Tasks**
+
+- [ ] New package `internal/transport/http/` with files:
+  - `http.go` — `func NewServer(mcpSrv *mcp.Server, listen string, logger *slog.Logger) (*http.Server, error)` that wires the `mcp.Server.Handle(...)` boundary into a `net/http.HandlerFunc`.
+  - `handler.go` — the actual handler. It decodes a JSON-RPC 2.0 request body, calls `mcpSrv.Handle(ctx, raw) (raw, err)`, writes the JSON-RPC response back with `Content-Type: application/json`. Errors return a JSON-RPC error object with the standard `code`/`message`.
+  - `listen.go` — `func parseListenFlag(s string) (host string, port int, err error)` validator. Refuses `0.0.0.0:` defaults (no security-by-obscurity default flip).
+  - `http_test.go` — `httptest.NewServer` with the handler; test the request-response pipeline end-to-end at the JSON-RPC layer.
+- [ ] In `cmd/mcp-confluence/main.go`: define `func newServeCmd()` that:
+  1. Reads `--listen` from the merged viper picture (`ATLASSIAN_LISTEN` env or default `127.0.0.1:8080`).
+  2. Validates with `parseListenFlag`; on parse failure, exit non-zero with a clear error on stderr.
+  3. Builds `mcp.Server` via `internal/server.New(deps)` (same call as `stdio`).
+  4. Constructs the HTTP transport via `internal/transport/http.NewServer(srv, listen, logger)`.
+  5. Blocks: `srv.ListenAndServe()` until SIGINT/SIGTERM/EOF (matches existing `serveUntilDone` signal handling).
+  6. On shutdown, calls `httpServer.Shutdown(ctx)` for graceful close.
+- [ ] Confirm the same `internal/tools/executeRequest()` pipeline executes for every HTTP request — i.e. the wire shape sent back to the caller over HTTP is the same TOON-enveloped string `stdin` would have produced.
+- [ ] Add a graceful `SIGINT/SIGTERM` handler that mirrors `stdio`'s ctx-cancel pattern (reuse `signal.NotifyContext`).
+- [ ] Per-request stderr log: `<TIMESTAMP> serve <METHOD> <path> <status> <bytes>` (one line per request). No token logged.
+- [ ] `cmd/mcp-confluence/cli_test.go` additions:
+  - `TestServe_Help` — assert serve `--help` contains the HERMES REGISTRATION block for serve mode (full YAML).
+  - `TestServe_Help_ShowsSecurityBlock` — assert serve `--help` includes the SECURITY section (127.0.0.1 default, no bearer auth, bind fails closed).
+  - `TestServe_Help_ListsTransportDifferences` — assert serve `--help` lists the wire-format difference from stdio.
+  - `TestServe_BindsAndShutsDown` — spawn `mcp-confluence serve --listen=127.0.0.1:0` (kernel picks free port); curl JSON-RPC `tools/list`; assert the response contains all 18 tool names; cancel context; assert exit 0.
+
+**Spec to follow:** the load-bearing references live in
+`specs/14-cobra-viper-golang/01-research-and-surface.md`
+(§3 the canonical pattern, §4 the MCP-server CLI conventions
+from `modelcontextprotocol/go-sdk` and `metoro-io/mcp-golang`),
+plus the inline Go docstrings for `internal/server.NewWithTransport`
+(the foundation this phase builds on top of).
+
+**Verification**
+
+- [ ] `internal/transport/http/http_test.go` is green (request-response pipeline)
+- [ ] `cmd/mcp-confluence/cli_test.go::TestServe_*` are green
+- [ ] `./bin/mcp-confluence serve --listen=127.0.0.1:8080` opens the port (verified by `ss -tln | grep 8080`)
+- [ ] `curl -X POST http://127.0.0.1:8080/mcp -d '{"jsonrpc":"2.0","method":"tools/list","id":1,"params":{}}' -H 'Content-Type: application/json'` returns a JSON response with `result.tools` containing all 18 tool names
+- [ ] `curl -X POST ... -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"conf_get","arguments":{"path":"/wiki/api/v2/spaces?limit=2"}},"id":2}'` returns TOON-encoded real Confluence data (matches the stdio smoke)
+- [ ] `./bin/mcp-confluence serve --listen=0.0.0.0:8080` is NOT rejected at parse time (only at network level — that's not our concern); the SECURITY note in the help text warns against this
+- [ ] `./bin/mcp-confluence serve --listen=not-a-listener` exits non-zero with an error on stderr
+- [ ] `make check` is green; no stdout writes anywhere
+- [ ] Live `curl` test against smartergroup.atlassian.net: `--api-token=$token --site=smartergroup --email=bennie@… bin/mcp-confluence serve --listen=127.0.0.1:8080 &`, then `curl … conf_get path=/wiki/api/v2/spaces?limit=2`, then verify the response contains the same TOON-encoded space list as the stdio smoke
+
+**Kickoff prompt body** (publish to `phase-18-prompt`):
+
+```
+You are implementing Phase 18 of the mcp-confluence plan. Read
+IMPLEMENTATION_PLAN.md, then the Phase 18 entry.
+
+OBJECTIVE: Add a TCP/HTTP transport under the `serve` subcommand
+that reuses the SAME mcp.Server built by internal/server.New().
+New package internal/transport/http/. Single endpoint POST /mcp
+that takes a JSON-RPC 2.0 body and returns a JSON-RPC 2.0
+response.
+
+REUSE — DO NOT REWRITE:
+- internal/server.New(deps) — same call as `stdio`.
+- internal/tools/executeRequest() — every tool call passes through
+  the SAME 9-step pipeline.
+- internal/atlassian.Client.Do — HTTP to Confluence API unchanged.
+
+CONSTRAINTS:
+- --listen defaults to 127.0.0.1:8080. Refuses 0.0.0.0 silently
+  (no security-by-obscurity default flip). Validates parseable
+  host:port; on parse failure exit non-zero with stderr.
+- stdout is reserved for JSON-RPC / HTTP body bytes only. All
+  logs to stderr. NO fmt.Println anywhere.
+- Per-request log line on stderr only — no request body, no
+  header values, definitely no ATLASSIAN_API_TOKEN.
+
+DONE WHEN:
+- make build + make check green.
+- curl http://127.0.0.1:8080/mcp -X POST -d '{"jsonrpc":"2.0","method":"tools/list","id":1}' returns 18 tool names.
+- curl ... conf_get ... returns the same TOON-encoded Confluence data as the stdio smoke.
+- ./bin/mcp-confluence serve --help writes help text to STDERR
+  (not stdout). help text includes a HERMES REGISTRATION YAML
+  block.
+- cli_test.go::TestServe_* all green.
+- Report commit SHA + curl output sample + serve --help text sample on phase-18-done.
+```
+
+---
+
+## Phase 19 — Final integration smoke (Hermes config + rebuild image + AGENTS.md sync)
+
+**Token budget:** ~64k soft · **Subagent:** yes · **Parallel-safe:** no
+(final integration step; depends on 16-18)
+
+**Objective:** Rebuild the distroless OCI image with the CLI
+surface baked in. Smoke against Hermes MCP-host config in BOTH
+transport modes (stdio for parity; serve as the new capability).
+Verify the user's dev-velocity loop end-to-end: rebuild →
+`./bin/mcp-confluence serve --listen=...` → curl → the
+Hermes MCP-host config example in AGENTS.md matches reality.
+
+**Tasks**
+
+- [ ] `make image` — rebuilds `paketobuildpacks/builder-jammy-tiny` with the CLI surface baked in. Confirm the distroless image contains a working `--help` (run `docker run --rm <image> --help 2>&1 | head -30`).
+- [ ] `docker run -d --rm --name mcp-confluence-smoke -p 127.0.0.1:18080:8080 <image> serve --listen=0.0.0.0:8080` then `curl http://127.0.0.1:18080/mcp -X POST -d '{"jsonrpc":"2.0","method":"tools/list","id":1}' -H 'Content-Type: application/json'`. Verify 18 tool names in the response.
+- [ ] Stop the smoke container.
+- [ ] Local smoke: `./bin/mcp-confluence serve --listen=127.0.0.1:8080 --site=smartergroup --email=bennie@obsidian.co.za --api-token=$ATLASSIAN_API_TOKEN &` in a tmux pane; from another shell, run `curl -X POST http://127.0.0.1:8080/mcp -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"conf_get_page_tree","arguments":{"page-id":"780764253","outputFormat":"json"}},"id":1}' -H 'Content-Type: application/json' | jq .` and confirm `children.results | length` returns 6 and `descendants.results | length` returns 10 (capped at limit=10). If that's the same envelope `scripts/smoke-page_tree.py` produces via stdio, the wire is identical.
+- [ ] AGENTS.md sync is **already done** at commit `aac804c`. Re-verify: open `AGENTS.md`, scroll to "## CLI surface", confirm all four subcommands listed, every subcommand's `--help` block contains a `HERMES REGISTRATION:` YAML example, the four hard rules (cobra+viper, stdout discipline, TCP fails-closed, lock-step CLI test) are documented.
+- [ ] Makefile sync — confirm `make help` still renders 22 targets and `make check` is green.
+
+**Verification**
+
+- [ ] `make image` exits 0; `make image-inspect` shows the same base layers as v0.1 + the new cobra+viper + Go stdlib net/http entry-points
+- [ ] `docker run --rm <image> --help </dev/null | head -1` returns **empty** (zero stdout pollution, even from inside a distroless container)
+- [ ] `docker run --rm <image> --help 2>&1 | grep -c "HERMES INTEGRATION"` returns 2 (stdio + serve)
+- [ ] The TCM/HTTP smoke (curl POST /mcp) returns the same JSON-RPC 2.0 envelope shape as the stdio smoke
+- [ ] `make check` and `make build` are green
+- [ ] README.md at the project root mentions the new `serve` subcommand (one bullet; full surface lives in AGENTS.md)
+
+**Kickoff prompt body** (publish to `phase-19-prompt`):
+
+```
+You are implementing Phase 19 of the mcp-confluence plan — the
+final integration smoke. Read IMPLEMENTATION_PLAN.md, then the
+Phase 19 entry. This phase is light on code and heavy on
+verification. OBJECTIVE: confirm the CLI surface (Phases 16-18)
+behaves correctly when packaged as a distroless OCI image AND
+when called from Hermes' mcp_servers config.
+
+STEPS:
+1. make image
+2. docker run --rm <image> --help </dev/null | head -1 (must be
+   empty — confirm stdout-protection holds in a distroless
+   container)
+3. docker run --rm <image> --help 2>&1 | grep -c HERMES INTEGRATION
+   (must be 2)
+4. docker run -d --rm --name mcp-confluence-smoke -p 127.0.0.1:18080:8080
+   <image> serve --listen=0.0.0.0:8080
+5. curl http://127.0.0.1:18080/mcp -X POST -d '{"jsonrpc":"2.0",
+   "method":"tools/list","id":1}' -H 'Content-Type: application/json'
+   (must return all 18 tool names)
+6. Stop the smoke container.
+7. make check
+8. AGENTS.md is already in sync (commit aac804c); confirm via
+   head-and-grep.
+
+DONE WHEN: all 4 verification rows above are green. Report
+commit SHA + container start logs + curl response sample +
+make check exit code on phase-19-done.
+```
+
+---
+
+## v4 — Done when
+
+- [ ] Phases 16, 17, 18, 19 are checked off above
+- [ ] `make image` produces a working CLI-image (both `serve` and `stdio` routes)
+- [ ] `./bin/mcp-confluence serve --help` writes to stderr, parses to the Hermes-host YAML example shown in AGENTS.md
+- [ ] `scripts/smoke-page_tree.py` still passes against the new binary's stdio mode (no regression)
+- [ ] A live `curl -X POST http://127.0.0.1:8080/mcp -d '{...}'` returns the same envelope shape — this is the dev-velocity proof: the user can iterate code, rebuild, and immediately smoke via curl without restarting Hermes
+- [ ] Hermes MCP-host config in `~/.hermes/config.yaml` can use either `args: ["stdio"]` or `args: ["serve", "--listen=127.0.0.1:8080"]` for the same tool surface — both work, both yield 18 tools
+
+---
+
+## What changed (2026-07-14, retrospective)
+
+This section will be populated as Phases 16-19 land. Approximate
+content:
+
+### What changed
+
+- **The 0 to 1 of the CLI surface.** A single binary now exposes
+  four subcommands. Stdlib `flag` is gone; cobra v1.10.2 +
+  viper v1.21.0 are added as direct deps. The 30-LOC stdlib
+  dotenv parser at `internal/config/dotenv.go` is preserved
+  verbatim — viper sits on top of it via a composition path.
+- **New transport.** `internal/transport/http/` (net/http
+  stdlib, no new Go deps) wraps the same `mcp.Server` instance
+  the stdio subcommand uses. Single endpoint `POST /mcp`,
+  JSON-RPC 2.0 in/out. `--listen=127.0.0.1:8080` default;
+  fails-closed bind.
+- **`internal/tools/` UNCHANGED.** All 18 tool handlers, the
+  `executeRequest()` 9-step pipeline, the JMESPath wrapper,
+  the TOON encoder, the 40k truncation, the error envelopes —
+  none of it changed. The CLI refactor is purely an entry-point
+  and framing concern.
+- **No new 3rd-party deps beyond cobra + viper.** The HTTP
+  listener uses `net/http` stdlib. JSON-RPC parsing also uses
+  stdlib (no extra library) — each HTTP request body is
+  passed to `mcp.Server.Handle(ctx, json.RawMessage)` as raw
+  bytes, then the response is written back. No new tool
+  registration. No JSON schema changes.
+
+### What didn't change
+
+- The 18 tool names. `mcp_confluence_conf_get` is still the
+  wire identifier on both transports (after the server prefix).
+- The five CRUD tool descriptions. Still byte-identical to
+  upstream `@aashari/mcp-server-atlassian-confluence` v3.3.0.
+- `internal/config/dotenv.go`. Q22-locked; the 30-LOC stdlib
+  parser and its 171-line test module are unchanged.
+- The settings resolution order: **CLI flag > process env >
+  cwd `.env` > binary-dir `.env`** — Q22's locked tiers, with
+  the upper two tiers now served by viper and the lower two
+  by the stdlib parser (composition).
+- The JSON-RPC stdout invariant: every byte that lands on
+  stdout is either a JSON-RPC stdio message, an HTTP request
+  body, or an HTTP response body. Help text, version text,
+  error text, log text — all on stderr. Enforced by
+  `rootCmd.SetOut(io.Discard) + SetErr(os.Stderr)`.
+- The MCP server constants — name `mcp-confluence`, version
+  `v0.1.0` — unchanged.
+
+### Dev-velocity outcome (the user's stated goal)
+
+For 90% of dev iterations, the loop is now:
+
+```
+make build
+./bin/mcp-confluence serve --listen=127.0.0.1:8080 &
+curl -X POST http://127.0.0.1:8080/mcp -d '...' | jq .
+```
+
+No Hermes restart. No `hermes mcp test confluence` round-trip.
+The terminal is the dev loop. Hermes registration is the
+final integration smoke (Phase 19), not the primary surface.
+
+The `stdio` subcommand is preserved as the canonical
+Hermes MCP-host integration path — but it is now one of two
+transport choices, not the only one.
