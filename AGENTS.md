@@ -4,11 +4,11 @@
 > project. The deep technical content lives in `specs/`; this
 > file summarizes and points — it doesn't replace.
 >
-> **Implementation status: COMPLETE.** As of 2026-07-13 the
+> **Implementation status: COMPLETE.** As of 2026-07-14 the
 > Go source tree (`cmd/` + `internal/`) is fully written:
-> 17 MCP tools wired through a single `executeRequest()`
-> pipeline, 156 test functions, a distroless OCI image
-> produced by `make image`. The phased delivery log lives in
+> **18 MCP tools** wired through a single `executeRequest()`
+> pipeline (the 18th, `conf_get_page_tree`, landed 2026-07-14),
+> 163 test functions, a distroless OCI image produced by `make image`. The phased delivery log lives in
 > `IMPLEMENTATION_PLAN.md`; this file documents the **what
 > exists today**, the **how it is laid out**, and the **few
 > hard rules** an agent must follow when touching it.
@@ -21,7 +21,7 @@
 
 A Confluence MCP server in Go that Hermes Agent can register as
 a stdio MCP server. The binary is a single static Go
-executable that exposes **17 tools** over the JSON-RPC stdio
+executable that exposes **18 tools** over the JSON-RPC stdio
 transport:
 
 | Group | Tools | Provenance |
@@ -32,7 +32,7 @@ transport:
 | Attachments (v3) | `conf_upload_attachment`, `conf_list_attachments`, `conf_delete_attachment` | binary uploads via v1 REST, list/delete via v2 (`specs/11-attachments`) |
 | drawio orchestrator (v3) | `conf_upload_drawio` | upload + embed in one call (`specs/12-drawio-attachments`) |
 
-All 17 handlers funnel through a single `executeRequest()`
+All 18 handlers funnel through a single `executeRequest()`
 helper in `internal/tools/` that runs the 9-step pipeline:
 URL build → call → JSON decode → JMESPath filter (if `jq`) →
 TOON encode → 40k truncation (if oversized) → typed API error
@@ -120,13 +120,13 @@ second-guess them.
    clients see accurate input schemas. Two structural tests
    lock this in (`TestArgsJsonschemaTagsPresent`,
    `TestArgsSchemasAreAccurate`).
-7. **Tool name set is frozen.** The 17 tool names registered in
+7. **Tool name set is frozen.** The 18 tool names registered in
    `internal/tools/register.go` are the EXACT names Hermes and
    any other MCP client will see in `tools/list` / `tools/call`.
    After the `mcp_confluence_` server prefix the wire identifiers
    are `mcp_confluence_conf_get`, etc.
-   `server_test.go`'s `TestNew_RegistersAllSeventeenTools` and
-   `TestNew_RegistersExactlySeventeenTools` enforce the set.
+   `server_test.go`'s `TestNew_RegistersAllEighteenTools` and
+   `TestNew_RegistersExactlyEighteenTools` enforce the set.
 
 ## Tech Stack
 
@@ -180,7 +180,7 @@ confluence-mcp/                              (Go module root)
 │   ├── templates/                            # compiled text/template helpers (AtlassianBaseURL, PageBodyPath, Backticked)
 │   ├── drawio/                               # drawio PNG encoding (PNG + tEXt "mxfile" chunk + URL-encoded inner XML)
 │   ├── server/                               # mcp.Server constructor (transport + version options + RegisterAll)
-│   └── tools/                                # 17 tool handlers + args + descriptions + executeRequest pipeline + safeHandler panic recovery + register
+│   └── tools/                                # 18 tool handlers + args + descriptions + executeRequest pipeline + safeHandler panic recovery + register
 └── specs/                                    # full spec set (Variant B, 4 sections per topic file)
     ├── README.md                             # reading guide
     ├── SOURCES.md                            # URL index
@@ -207,16 +207,16 @@ confluence-mcp/                              (Go module root)
 | ------ | ----- |
 | Total Go lines (`*.go`, including tests) | ~14,000 |
 | Production functions (non-test) | ~170 |
-| Test functions | ~156 |
+| Test functions | ~163 |
 | Internal packages | 10 (`config`, `atlassian`, `jmespath`, `toon`, `markdown`, `templates`, `drawio`, `server`, `tools`, plus the `cmd/` entrypoint) |
-| MCP tools registered | 17 |
+| MCP tools registered | 18 |
 | CRUD tool descriptions locked by `descriptions_test.go` byte equality | 5 |
 | Spec topic folders | 14 |
 
 ## Architecture (one-paragraph summary)
 
 The binary is a thin, JSON-aware wrapper over Confluence Cloud
-REST v1 + v2. The 17 MCP tools each register through
+REST v1 + v2. The 18 MCP tools each register through
 `tools.RegisterAll(srv, client)`; registration is the only
 place where the adapter closures live (mcp-golang's typed
 adapter → the Phase 7 `Handler(ctx, json.RawMessage) → (string,
@@ -252,7 +252,7 @@ Layer-by-layer, with code skeletons:
 
 | Concept | Where documented |
 | ------- | ---------------- |
-| 17 tools + their input shapes | `specs/05-tool-surface-design/` (CRUD) + `specs/10-markdown-roundtrip/04-tool-surface.md` (markdown) + `specs/11-attachments/` (attachments) + `specs/12-drawio-attachments/` (drawio) |
+| 18 tools + their input shapes | `specs/05-tool-surface-design/` (CRUD) + `specs/10-markdown-roundtrip/04-tool-surface.md` (markdown) + `specs/11-attachments/` (attachments) + `specs/12-drawio-attachments/` (drawio) + `specs/13-page-tree-index/` (page-tree index tool) |
 | Settings resolution order (env > .env cwd > .env binary-dir) | `specs/01-foundations/03-env-var-contract.md` |
 | The JSON-RPC stdout invariant (no `fmt.Println` to stdout) | `specs/09-anti-patterns/01-stdout-pollution.md` |
 | API token redaction (never log; length-only in `verify-env`) | `specs/09-anti-patterns/02-secret-handling.md` |
@@ -300,10 +300,10 @@ Layer-by-layer, with code skeletons:
    the args struct + description in `internal/tools/`,
    the handler in the appropriate `*_handlers.go` file, and
    the registration entry in `internal/tools/register.go`.
-   Then add a `TestNew_RegistersAllSeventeenTools`-style
+   Then add a `TestNew_RegistersAllEighteenTools`-style
    assertion in `server_test.go` that updates the count.
-   Today it asserts **exactly 17** — bump it to 18 if you
-   add the 18th.
+   Today it asserts **exactly 18** — bump it to 19 if you
+   add the 19th.
 
 ### Skills to load
 
@@ -334,7 +334,7 @@ Layer-by-layer, with code skeletons:
   value. Don't add a verbose env-print that would leak the
   secret. The startup log on `runLifecycle` also redacts:
   `Note: API token value not logged for security`.
-- **Tool name set is frozen.** The 17 names registered in
+- **Tool name set is frozen.** The 18 names registered in
   `internal/tools/register.go` are the wire identifiers
   (`mcp_confluence_conf_get` after the server prefix). Drift
   is a breaking change; `server_test.go` asserts the set
@@ -374,12 +374,12 @@ make info                # show project + tool versions
 
 | Item | Result | How verified |
 | ---- | ------ | ------------ |
-| 17 tools registered | ✅ | `internal/server/server_test.go` — `TestNew_RegistersAllSeventeenTools` + `TestNew_RegistersExactlySeventeenTools` |
-| All tests green | ✅ | `make test` — 156 test functions across 10 packages |
+| 18 tools registered | ✅ | `internal/server/server_test.go` — `TestNew_RegistersAllEighteenTools` + `TestNew_RegistersExactlyEighteenTools` |
+| All tests green | ✅ | `make test` — 163 test functions across 10 packages |
 | `make build` produces a working binary | ✅ | `bin/mcp-confluence` exists, prints lifecycle startup on run |
 | `make check` (lint + test) | ✅ | `go vet ./...` clean, `gofmt -l .` returns nothing |
 | `make image` produces distroless OCI image | ✅ | pack + Paketo Go BuildPak pipeline (`project.toml`) |
-| Hermes registers the server and lists 17 tools | ✅ | `hermes mcp test confluence` against the running container |
+| Hermes registers the server and lists 18 tools | ✅ | `hermes mcp test confluence` against the running container |
 | Confluence Cloud acceptance (smoke-tested 2026-07-10 on smartergroup.atlassian.net) | ✅ | Confluence API returned valid IDs for the v1, v1+conf_get, v2 CRUD calls |
 
 **Spec-set verification** (still relevant for future spec
