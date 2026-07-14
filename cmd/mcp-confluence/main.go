@@ -63,10 +63,14 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -78,6 +82,7 @@ import (
 	"github.com/bennie/mcp-confluence/internal/atlassian"
 	"github.com/bennie/mcp-confluence/internal/config"
 	"github.com/bennie/mcp-confluence/internal/server"
+	httptransport "github.com/bennie/mcp-confluence/internal/transport/http"
 )
 
 // version is settable via -ldflags "-X main.version=<x>" so the
@@ -186,6 +191,9 @@ JSON-RPC stream when running in stdio mode.`,
 		"Enable verbose stderr logging (mirrors the DEBUG env var)")
 	pflags.String("config", "",
 		"Path to an optional viper-compatible config file (JSON/YAML/TOML)")
+	pflags.String("listen", "127.0.0.1:8080",
+		"TCP/HTTP listen address for the `serve` subcommand (host:port). "+
+			"Default binds to localhost only.")
 
 	// Subcommand factories. Both are stubs in Phase 16: they call
 	// run() directly, exactly like the v0.1 default invocation.
@@ -265,31 +273,191 @@ env so the locked Q22 .env ordering is preserved by composition.`,
 	}
 }
 
-// newServeCmd returns the `serve` subcommand. Phase 16 stub:
-// delegates to run() directly. Phase 18 will replace the RunE
-// with the net/http listener and the internal/transport/http
-// package. Phase 18 also adds the --listen flag.
+// newServeCmd returns the `serve` subcommand. Phase 18 wires the
+// TCP/HTTP transport: a net/http listener accepts POST /mcp
+// requests, and each request is dispatched to the SAME mcp.Server
+// instance the stdio subcommand uses (only the framing differs).
+//
+// Dependency construction mirrors runLifecycle (cfg → client → server)
+// so the resolve-and-build order is identical to the stdio path.
+// The deps-building is duplicated here rather than extracted into
+// a helper because runLifecycle also wires stdin/stdout through an
+// io.Pipe and calls serveUntilDone — those stdio-specific steps are
+// not what serve wants; extracting them would create a leaky
+// abstraction. The two paths share the configuration and dependency
+// tiers but the lifecycle diverges after srv construction.
+//
+// Signal handling: SIGINT/SIGTERM cancel the context, httpSrv.Shutdown
+// is called with a 5-second grace period, and Serve errors other than
+// http.ErrServerClosed are propagated as RunE errors so the operator
+// sees a non-zero exit on listener failure.
 func newServeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "serve",
 		Short: "Run the MCP server on TCP/HTTP (POST /mcp JSON-RPC bridge)",
 		Long: `serve runs the mcp-confluence MCP server on a TCP/HTTP
-socket. Each POST /mcp HTTP request is dispatched to the SAME
-mcp.Server instance the stdio subcommand uses — only the framing
-changes. The transport is a net/http stdlib wrapper; no new Go
-dependencies.
+socket. Each POST /mcp HTTP request is dispatched to the same
+mcp.Server the stdio subcommand uses — only the framing changes.
 
-This subcommand is a Phase 16 STUB — it currently delegates to
-run() (i.e. starts the stdio transport) and behaves identically
-to 'mcp-confluence stdio' or the default invocation. Phase 18
-introduces the TCP/HTTP listener and the --listen flag.`,
+USAGE:
+  mcp-confluence serve [flags]
+
+FLAGS:
+      --listen string   host:port to bind (default 127.0.0.1:8080)
+      --site string     Confluence site prefix (overrides ATLASSIAN_SITE_NAME)
+      --email string    Account email (overrides ATLASSIAN_USER_EMAIL)
+      --api-token string  API token (overrides ATLASSIAN_API_TOKEN). NEVER log this.
+      --debug bool      Enable verbose stderr logging (mirrors DEBUG env)
+      --config string   Optional viper-compatible config file (JSON/YAML/TOML)
+
+EXAMPLES:
+  # Bind to localhost (most common; dev/test):
+  mcp-confluence serve --listen=127.0.0.1:8080
+
+  # Bind to all interfaces (only behind a trusted reverse proxy):
+  mcp-confluence serve --listen=0.0.0.0:8080
+
+  # Kernel-pick an ephemeral port (for scripted smoke tests):
+  mcp-confluence serve --listen=127.0.0.1:0
+
+HERMES REGISTRATION:
+  # ~/.hermes/config.yaml — register the HTTP-bridged MCP server
+  mcp_servers:
+    confluence:
+      command: /path/to/mcp-confluence
+      args: ["serve", "--listen=127.0.0.1:8080"]
+      env:
+        ATLASSIAN_SITE_NAME: smartergroup
+        ATLASSIAN_USER_EMAIL: "you@example.com"
+        ATLASSIAN_API_TOKEN:  "${ATLASSIAN_API_TOKEN}"
+
+SECURITY:
+  - No bearer auth on /mcp — the binary holds the credential, not the caller.
+  - Default bind is 127.0.0.1:8080 (localhost only).
+  - Bind fails closed: malformed --listen exits non-zero.
+  - 0.0.0.0 binds are parseable but must only be used behind a trusted proxy.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Phase 18 will replace this body with:
-			//   listen := viper.GetString("listen")
-			//   httpSrv := httpTransport.NewServer(mcpSrv, listen, ...)
-			//   return httpSrv.ListenAndServe()
-			// For Phase 16 the stub preserves behavior.
-			return run()
+			// Compose flag values into the process env so the
+			// Q22-locked config.LoadFromEnv reads them at the
+			// highest tier. Same helper as the stdio path.
+			composeFlagsIntoEnv()
+
+			// Read --listen via the package-singleton viper
+			// (the one bindViperToFlags bound to the
+			// persistent flags). Flag > env > config
+			// precedence already applies.
+			listen := pkgViper.GetString("listen")
+			if listen == "" {
+				listen = "127.0.0.1:8080"
+			}
+
+			// Build the same dependency chain the stdio
+			// subcommand builds: config → atlassian.Client →
+			// mcp.Server. The serve path differs in one
+			// place: instead of server.New (which uses
+			// the stdio transport), we use
+			// server.NewWithTransport so the bridge is
+			// the transport the mcp-golang protocol
+			// installs its message handler on. The
+			// bridge's Start is a no-op (the httpSrv
+			// drives the lifecycle), so the readLoop of
+			// the underlying transport.Transport never
+			// starts — but the protocol's Connect still
+			// wires messageHandler onto the bridge,
+			// which is what the dispatch loop in
+			// handler.go needs.
+			cfg, err := config.LoadFromEnv()
+			if err != nil {
+				return fmt.Errorf("config: %w", err)
+			}
+			cli, err := atlassian.New(cfg)
+			if err != nil {
+				return fmt.Errorf("build atlassian client: %w", err)
+			}
+
+			// Two-step wiring: build the bridge first,
+			// pass it to server.NewWithTransport so the
+			// mcp-golang protocol registers itself on
+			// the bridge, then build the http.Server
+			// around the SAME bridge. Sharing the
+			// bridge is what makes the POST /mcp →
+			// JSON-RPC dispatch → response round-trip
+			// work.
+			bridge := httptransport.NewBridge()
+			srv, err := server.NewWithTransport(
+				server.ServerDeps{Config: cfg, Client: cli},
+				bridge,
+			)
+			if err != nil {
+				return fmt.Errorf("build mcp server: %w", err)
+			}
+
+			// Build the *http.Server. NewHTTPServer
+			// calls parseListenFlag internally, so a
+			// bad --listen value (e.g. "not-a-port")
+			// returns a typed error here.
+			logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+			httpSrv, err := httptransport.NewHTTPServer(bridge, listen, logger)
+			if err != nil {
+				return fmt.Errorf("serve: %w", err)
+			}
+
+			// Wire signals: SIGINT/SIGTERM cancel the
+			// lifecycle context. Shutdown is invoked with
+			// a 5-second grace period below.
+			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+			defer stop()
+
+			// Bind the listener explicitly so the
+			// resolved address (when --listen has port=0,
+			// the kernel picks one) is logged. We could
+			// have used httpSrv.ListenAndServe() but that
+			// hides the bound port — for smoke tests and
+			// operator UX, logging the resolved address
+			// is worth the 3 extra lines.
+			ln, err := net.Listen("tcp", listen)
+			if err != nil {
+				return fmt.Errorf("listen %s: %w", listen, err)
+			}
+			log.Printf("mcp-confluence %s serving on http://%s (site=%s, email=%s)",
+				version, ln.Addr().String(), cfg.SiteName, cfg.UserEmail)
+
+			// Run srv.Serve() so the protocol layer wires
+			// the message handler onto the bridge.
+			// srv.Serve() returns nil almost immediately
+			// (the bridge's Start is a no-op), and from
+			// then on the httpSrv is the active serving
+			// surface.
+			if err := srv.Serve(); err != nil {
+				return fmt.Errorf("mcp server: %w", err)
+			}
+
+			// Drive httpSrv in a goroutine so we can
+			// select on signal-vs-error in the main
+			// goroutine. http.ErrServerClosed is the
+			// normal Shutdown return value; we filter
+			// it out so a clean shutdown isn't
+			// misreported.
+			serveErr := make(chan error, 1)
+			go func() {
+				if err := httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
+					serveErr <- err
+				}
+			}()
+
+			select {
+			case <-ctx.Done():
+			case err := <-serveErr:
+				return err
+			}
+
+			// Graceful shutdown. 5s is enough for the
+			// in-flight HTTP requests to drain; the
+			// bridge transport has no goroutine of its
+			// own to wait on.
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return httpSrv.Shutdown(shutdownCtx)
 		},
 	}
 }
@@ -344,6 +512,7 @@ func bindViperToFlags(pflags *pflag.FlagSet) {
 	_ = v.BindEnv("email", "USER_EMAIL")
 	_ = v.BindEnv("api-token", "API_TOKEN")
 	_ = v.BindEnv("debug", "DEBUG") // DEBUG is unprefixed; see below.
+	_ = v.BindEnv("listen", "LISTEN")
 
 	// BindPFlag AFTER the flag is registered (the canonical
 	// cobra+viper gotcha). pflag.FlagSet.Lookup returns the flag
@@ -359,6 +528,9 @@ func bindViperToFlags(pflags *pflag.FlagSet) {
 	}
 	if f := pflags.Lookup("debug"); f != nil {
 		_ = v.BindPFlag("debug", f)
+	}
+	if f := pflags.Lookup("listen"); f != nil {
+		_ = v.BindPFlag("listen", f)
 	}
 	// --config is a path flag; Phase 16/17/18 don't read its
 	// value into viper yet. It's registered so --help lists it;
@@ -423,6 +595,7 @@ func composeFlagsIntoEnv() {
 		_ = v.BindEnv("email", "USER_EMAIL")
 		_ = v.BindEnv("api-token", "API_TOKEN")
 		_ = v.BindEnv("debug", "DEBUG")
+		_ = v.BindEnv("listen", "LISTEN")
 	}
 
 	// Inject each non-empty value into the appropriate

@@ -11,12 +11,17 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/json"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // binaryPath returns the absolute path to the freshly-built binary.
@@ -570,5 +575,197 @@ func TestStdio_HelpNoFlagOverride(t *testing.T) {
 	// rendering path.
 	if !strings.Contains(stderr.String(), "HERMES REGISTRATION") {
 		t.Errorf("stdio --help stderr missing HERMES REGISTRATION block")
+	}
+}
+
+// --- Phase 18 — serve subcommand lifecycle gate -------------------------
+//
+// TestServe_BindsAndShutsDown exercises the FULL Phase 18 happy path:
+// spawn the serve subcommand bound to an ephemeral port, wait for the
+// listening line on stderr, send a JSON-RPC tools/list over HTTP,
+// assert the response has 18 tools, then send SIGTERM and assert the
+// process exits 0.
+//
+// This is the load-bearing integration test for the new
+// internal/transport/http package — it would catch a regression in
+// the bridge transport (no tools would come back), the listener
+// startup (we'd never see the listening line), or the shutdown path
+// (a non-zero exit would trip the assert).
+//
+// The test uses a goroutine to drain stderr into a slice of lines so
+// we can poll for the "serving on http://127.0.0.1:NNNN" line as
+// soon as it lands — a synchronous read on the buffer would block
+// forever (the process is still running and writes are line-buffered
+// to a pipe).
+func TestServe_BindsAndShutsDown(t *testing.T) {
+	t.Parallel()
+	bin := binaryPath(t)
+
+	// Spawn the serve subcommand bound to an ephemeral port
+	// (--listen=127.0.0.1:0 → kernel picks the port). The flags
+	// --site/--email/--api-token satisfy the Q22 validation path
+	// so config.LoadFromEnv returns a valid cfg; the token
+	// value is a non-secret placeholder (the tools/list call
+	// doesn't actually fire any HTTP request to Atlassian — the
+	// server is bound to the bridge transport).
+	cmd := exec.Command(bin, "serve", "--listen=127.0.0.1:0",
+		"--site=test", "--email=test@example.com", "--api-token=test-placeholder")
+	cmd.Stdin = strings.NewReader("")
+	// Clean temp dir so neither the repo's .env nor a developer's
+	// shell leaks real credentials into the test.
+	cmd.Dir = t.TempDir()
+
+	// Drain stderr into a thread-safe buffer via a goroutine.
+	// The bridge's per-request log line is the load-bearing
+	// signal we read; the listening line is the gate.
+	var (
+		mu        = make(chan struct{}, 1)
+		stderrBuf bytes.Buffer
+		muAcquire = func() { <-mu }
+		muRelease = func() { mu <- struct{}{} }
+	)
+	muRelease() // prime the semaphore
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	cmd.Stderr = pw
+	// Stdout must be io.Discard (the JSON-RPC channel is closed
+	// for serve but we still preserve the discipline).
+	cmd.Stdout = os.Stderr // capture if anything leaks; serve writes to HTTP not stdout
+
+	drainDone := make(chan struct{})
+	go func() {
+		defer close(drainDone)
+		scanner := bufio.NewScanner(pr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			muAcquire()
+			stderrBuf.WriteString(line)
+			stderrBuf.WriteByte('\n')
+			muRelease()
+		}
+	}()
+	// Close pw in the parent so the goroutine's scanner EOFs
+	// when the child closes its stderr (which it doesn't — it
+	// stays open — so we close pw in the defer below after the
+	// child has been signalled).
+	defer func() { _ = pw.Close() }()
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("serve start: %v", err)
+	}
+
+	// Tear down the child even on a test failure.
+	t.Cleanup(func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Signal(syscall.SIGTERM)
+		}
+		_ = cmd.Wait()
+		_ = pr.Close()
+		<-drainDone
+	})
+
+	// Wait for the listening line. The newServeCmd RunE logs:
+	//   mcp-confluence v0.1.0 serving on http://127.0.0.1:NNNN (...)
+	// We poll stderr (guarded by the mu semaphore) until the
+	// line appears or the deadline expires.
+	var port string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		muAcquire()
+		snapshot := stderrBuf.String()
+		muRelease()
+		// Look for the line. The log format is fixed by
+		// the RunE body so we can rely on it.
+		const marker = "serving on http://127.0.0.1:"
+		if idx := strings.Index(snapshot, marker); idx >= 0 {
+			after := snapshot[idx+len(marker):]
+			// Extract the port: characters until the next
+			// space, paren, or newline.
+			end := 0
+			for end < len(after) {
+				c := after[end]
+				if c == ' ' || c == '(' || c == '\n' {
+					break
+				}
+				end++
+			}
+			port = after[:end]
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if port == "" {
+		muAcquire()
+		full := stderrBuf.String()
+		muRelease()
+		t.Fatalf("did not find listening line in stderr within 5s\nstderr:\n%s", full)
+	}
+
+	// Send a tools/list JSON-RPC request via HTTP POST /mcp.
+	// The bridge transport's handler should:
+	//   1. Reserve a per-request channel
+	//   2. Decode the JSON-RPC envelope
+	//   3. Dispatch to mcp.Server.handleMessage
+	//   4. Wait for the protocol to push the response back
+	//   5. Return the JSON-RPC response with the 18 tools
+	body := `{"jsonrpc":"2.0","method":"tools/list","id":1}`
+	resp, err := http.Post("http://127.0.0.1:"+port+"/mcp",
+		"application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST /mcp: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		muAcquire()
+		full := stderrBuf.String()
+		muRelease()
+		t.Fatalf("POST /mcp returned status %d\nstderr:\n%s", resp.StatusCode, full)
+	}
+
+	var rpcResp struct {
+		Result struct {
+			Tools []map[string]any `json:"tools"`
+		} `json:"result"`
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if rpcResp.Error != nil {
+		t.Fatalf("JSON-RPC error: code=%d message=%q", rpcResp.Error.Code, rpcResp.Error.Message)
+	}
+	if got, want := len(rpcResp.Result.Tools), 18; got != want {
+		muAcquire()
+		full := stderrBuf.String()
+		muRelease()
+		t.Errorf("got %d tools, want %d\nstderr:\n%s", got, want, full)
+	}
+
+	// SIGTERM. The RunE handler installs a signal.NotifyContext
+	// for SIGINT/SIGTERM, so this triggers the shutdown path:
+	// the context is cancelled, the goroutine serving httpSrv
+	// returns ErrServerClosed, the deferred Shutdown fires
+	// with a 5s grace period, and the process exits 0.
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("SIGTERM: %v", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		// A clean shutdown exits 0; a non-zero exit is a
+		// regression in the lifecycle path.
+		ee, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("serve Wait returned non-ExitError: %v", err)
+		}
+		muAcquire()
+		full := stderrBuf.String()
+		muRelease()
+		t.Fatalf("serve exited with code %d on SIGTERM (want 0)\nstderr:\n%s",
+			ee.ExitCode(), full)
 	}
 }
