@@ -30,6 +30,12 @@ $EDITOR .env
 ./bin/mcp-confluence serve --listen=127.0.0.1:8080  # or as TCP/HTTP
 ```
 
+- Each of the 18 MCP tools is also exposed as a first-class
+  cobra subcommand — invoke directly from the shell
+  (`./bin/mcp-confluence conf_get --path=...` → TOON-encoded
+  Confluence data on stdout). Full table in
+  [AGENTS.md §"Per-tool subcommands (v5)"](AGENTS.md).
+
 See [docs/01-cli-quick-start.md](docs/01-cli-quick-start.md)
 for the full walkthrough, [docs/02-automation-scripts.md](docs/02-automation-scripts.md)
 for shell/Python examples, and [docs/03-ai-agent-config.md](docs/03-ai-agent-config.md)

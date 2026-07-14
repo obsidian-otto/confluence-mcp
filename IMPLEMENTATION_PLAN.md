@@ -1168,6 +1168,10 @@ Append a bullet after each phase:
 - 2026-07-14 — **Phase 18 (v4)**: `mcp-confluence serve` + new `internal/transport/http/` package — sha=`5006a86`. Bridge transport (`httptransport.NewBridge()` + `server.NewWithTransport(deps, bridge)` + `httptransport.NewHTTPServer(bridge, listen, logger)`) wraps the same mcp-golang server the stdio path uses; only the framing changes. `--listen` defaults to `127.0.0.1:8080`, fails closed on parse failure. 5 new transport files (1142 LOC) + 8 http_test.go cases + TestServe_BindsAndShutsDown in cli_test.go (spawn, curl POST /mcp tools/list, assert 18 tools, SIGTERM, exit 0). 7 files changed, 2055 insertions, 19 deletions.
 - 2026-07-14 — **Phase 19 (v4)**: final integration smoke — sha=`be1f3db`. `make image` rebuilds the distroless OCI image with the CLI surface baked in (cobra+viper+net/http symbols all present). Distroless binary's `serve --help` writes 0 bytes to stdout, 3529 bytes to stderr — JSON-RPC stdout invariant holds in the container too. The 18-tool set is reachable via both `args: ["stdio"]` and `args: ["serve", "--listen=..."]` — verified via live `curl POST /mcp` and `TestServe_BindsAndShutsDown`. AGENTS.md, Makefile, README.md all in sync (no further changes required).
 - 2026-07-14 — **Plan complete: 4 of 4 v4 phases landed**. v1 (12 phases) + v2 markdown round-trip (3 phases) + v3 attachments (2 phases) + v1.x page-tree (1 phase) + v4 CLI refactor (4 phases) = 22 phases total, all committed on `main`.
+- 2026-07-14 — **Phase 20 (v5)**: 5 CRUD per-tool CLI subcommands wired — sha=`593c2b4`. Reflection-driven flag binding (args-struct `jsonschema:"description=...,required"` tags → cobra flag registration) via `bindFlagsFromArgsStruct` in `cmd/mcp-confluence/cli_tool_dispatch.go`. New files: `cli_tool_dispatch.go` (dispatcher), `cli_tool_crud.go` (5 CRUD factories). First live invocation: `conf_get --path=/wiki/api/v2/spaces?limit=2` returns TOON-encoded real data on stdout, byte-identical to a `tools/call` JSON-RPC response.
+- 2026-07-14 — **Phase 21 (v5)**: remaining 13 per-tool subcommands wired (total: 18) — sha=`ef6d912`. New files: `cli_tool_convenience.go` (6 factories: `conf_list_spaces`, `conf_list_pages`, `conf_get_page_body`, `conf_get_page_tree`, `conf_search`, `conf_help`), `cli_tool_markdown.go` (3: `conf_post_markdown`, `conf_put_markdown`, `conf_get_page_markdown`), `cli_tool_attachments.go` (3: `conf_upload_attachment`, `conf_list_attachments`, `conf_delete_attachment`), `cli_tool_drawio.go` (1: `conf_upload_drawio`). `TestAllEighteenToolSubcommandsExist` locks the 22-name surface (`18 conf_*` + `stdio` + `serve` + `help` + `completion`). `make check` green; the binary's `--help` lists all 22.
+- 2026-07-14 — **Phase 22 (v5)**: end-to-end live invocation smoke — sha=`3595adf`. `TestConfGet_EndToEndLiveInvocation` gated on `$ATLASSIAN_API_TOKEN`, exercises BOTH the raw REST pass-through (call `conf_get --path=...` on the binary) AND the typed wrapper (call `conf_get_page_markdown --pageId=...` on the binary). Test is skipped in CI when the env var is not set. `make build` + `make test` + `make check` all green.
+- 2026-07-14 — **v5 plan complete: 3 of 3 v5 phases landed**. 22 subcommands (18 `conf_*` + `stdio` + `serve` + `help` + `completion`) reachable from the shell, each 1:1 over the locked `Handle*` functions in `internal/tools/`. Same byte stream as a `tools/call` JSON-RPC invocation. New JSON-RPC stdout invariant carve-out: per-tool subcommands are the ONE legitimate stdout writer in the binary (tool results print to stdout so they can be piped to `jq` / a file); the "no stdout writes" rule still holds for the `stdio` and `serve` transports. Total phases landed across all plan versions: v1 (12) + v2 (3) + v3 (2) + v1.x (1) + v4 (4) + v5 (3) = 25 phases on `main`.
 
 ---
 ## Done when
@@ -1701,3 +1705,214 @@ final integration smoke (Phase 19), not the primary surface.
 The `stdio` subcommand is preserved as the canonical
 Hermes MCP-host integration path — but it is now one of two
 transport choices, not the only one.
+
+---
+
+## v5 — Per-tool CLI subcommands (2026-07-14, complete)
+
+> **User's 2026-07-14 instruction (verbatim):** *"You will
+> create 18 subcommands in the cli interface, one for each
+> tool that is already in the mcp server. So the cli app
+> will give access to the same tools as the mcp server."*
+>
+> **User's 2026-07-14 follow-up (verbatim):** *"Update
+> AGENTS.md and all documentation about this."*
+
+### Objective
+
+The v4 refactor made the binary a CLI app with 4
+subcommands (`stdio`, `serve`, `help`, `completion`).
+That gave a dev loop for transport-level smoke
+(`./bin/mcp-confluence serve --listen=…` + `curl POST /mcp`),
+but the user wanted the **tool-level** dev loop too:
+invoke `conf_get`, `conf_post_markdown`,
+`conf_upload_drawio` etc. directly from the shell, with no
+JSON-RPC framing and no `mcp.Server` round-trip.
+
+The v5 plan delivers this by adding 18 per-tool
+subcommands — one per MCP tool. Each is a 1:1 shell adapter
+over the same `Handle*` function the MCP transport invokes.
+CLI invocation returns **byte-identical output** to a
+`tools/call` JSON-RPC invocation. The dev-velocity loop
+becomes:
+
+```
+make build
+./bin/mcp-confluence conf_get --path=/wiki/api/v2/spaces?limit=2
+```
+
+No Hermes restart. No `curl` + JSON-RPC envelope. No
+`hermes mcp test confluence` round-trip. The terminal is
+the dev loop; Hermes registration stays the final
+integration smoke (already verified in Phase 19).
+
+**Spec set:** no new specs folder. The v5 plan builds on
+the v4 spec set
+(`specs/14-cobra-viper-golang/`) plus the existing
+`internal/tools/` package. The v5 work is pure Go — new
+CLI dispatcher + per-tool factories in
+`cmd/mcp-confluence/cli_tool_*.go`.
+
+### What v5 changes
+
+- **18 new cobra subcommands** in `cmd/mcp-confluence/`
+  (`conf_get`, `conf_post`, `conf_put`, `conf_patch`,
+  `conf_delete`, `conf_list_spaces`, `conf_list_pages`,
+  `conf_get_page_body`, `conf_get_page_tree`, `conf_search`,
+  `conf_help`, `conf_post_markdown`, `conf_put_markdown`,
+  `conf_get_page_markdown`, `conf_upload_attachment`,
+  `conf_list_attachments`, `conf_delete_attachment`,
+  `conf_upload_drawio`). Each is wired via the central
+  dispatcher `cmd/mcp-confluence/cli_tool_dispatch.go` —
+  no shadow handlers, no parallel implementations.
+- **Reflection-driven flag binding.** The args struct that
+  the MCP server already exposes (the one whose
+  `jsonschema:"description=...,required"` tags feed
+  `tools/list`) is also reflected over to drive cobra flag
+  registration. One source of truth: change a description
+  in the args struct, and both the MCP `tools/list`
+  response and the subcommand's `--help` text update on
+  the next build. See `bindFlagsFromArgsStruct` in
+  `cmd/mcp-confluence/cli_tool_dispatch.go`.
+- **New stdout invariant carve-out.** The "stdout is
+  reserved for the JSON-RPC stream" rule still holds for
+  the `stdio` and `serve` transports (where stdout is the
+  wire). The per-tool subcommands are the **ONE**
+  legitimate stdout writer in the binary — tool results
+  print to stdout so they can be piped to `jq`, to a file,
+  to `pbcopy`. This is the load-bearing piece that makes
+  the dev-velocity loop work.
+- **No new third-party dependencies.** The dispatcher
+  uses stdlib `reflect` + `cobra` (already in go.mod from
+  v4). No new tool registrations. No new tool args
+  structs. The `internal/tools/` package is **unchanged**
+  — the v5 work is purely an entry-point concern, like
+  v4.
+
+### Phases 20-22 (v5)
+
+- [x] **Phase 20** — 5 CRUD per-tool CLI subcommands wired
+  (`conf_get`, `conf_post`, `conf_put`, `conf_patch`,
+  `conf_delete`) via a single dispatcher + reflection
+  flag binder. First live invocation proves
+  byte-identical output to `tools/call`. `make build`
+  green. **Commit: `593c2b4`.**
+
+- [x] **Phase 21** — remaining 13 per-tool subcommands
+  wired across 4 factory files: 6 convenience helpers,
+  3 markdown round-trip tools, 3 attachment tools, 1
+  drawio orchestrator. `TestAllEighteenToolSubcommandsExist`
+  locks the 22-name surface (`18 conf_*` + `stdio` +
+  `serve` + `help` + `completion`). `make check` green;
+  the binary's `--help` lists all 22.
+  **Commit: `ef6d912`.**
+
+- [x] **Phase 22** — end-to-end live invocation smoke
+  (`TestConfGet_EndToEndLiveInvocation` gated on
+  `$ATLASSIAN_API_TOKEN`), exercises BOTH the raw REST
+  pass-through (`conf_get --path=...`) AND the typed
+  wrapper (`conf_get_page_markdown --pageId=...`). Test
+  is skipped in CI when the env var is not set.
+  AGENTS.md, README.md, and IMPLEMENTATION_PLAN.md all
+  synced with the v5 surface. `make check` green.
+  **Commit: `3595adf`.**
+
+### Done when
+
+- [x] The 18 per-tool CLI subcommands are reachable from
+  the shell (verified: `./bin/mcp-confluence --help`
+  lists all 22 subcommands; `18 conf_*` + `stdio` +
+  `serve` + `help` + `completion`).
+- [x] CLI invocation returns byte-identical output to a
+  `tools/call` JSON-RPC invocation (verified via
+  `TestConfGet_EndToEndLiveInvocation` against the real
+  Confluence API; same TOON-encoded `conf_get` payload on
+  both transports).
+- [x] `TestAllEighteenToolSubcommandsExist` locks the
+  surface — adding a 19th tool requires deleting the
+  test or changing the count, by design.
+- [x] AGENTS.md has a `### Per-tool subcommands (v5)`
+  section with the 18-row subcommand table, the
+  reflection-driven flag generation explanation, the
+  stdout-invariant carve-out, and the security notes
+  (token never logged, banner shows site+email only).
+  README.md has the one-line v5 bullet under `## Quick
+  start`. IMPLEMENTATION_PLAN.md has the `## v5 — …`
+  section + 3 phase-log bullets.
+
+### What changed (2026-07-14, retrospective)
+
+#### What changed
+
+- **18 new cobra subcommands** in `cmd/mcp-confluence/` —
+  one per MCP tool. Each is a thin factory in
+  `cli_tool_<group>.go` that calls into the central
+  dispatcher `cli_tool_dispatch.go`. The dispatcher
+  reflects over the args struct to register cobra flags
+  (driven by the same `jsonschema:"description=…,required"`
+  tags that feed `tools/list`), then on `RunE` decodes
+  `os.Args` flags into the struct, calls the locked
+  `Handle*` function, and writes the tool result to
+  stdout.
+- **No changes to `internal/tools/`.** The 18 tool
+  handlers, the `executeRequest()` 9-step pipeline, the
+  JMESPath wrapper, the TOON encoder, the 40k
+  truncation, the error envelopes — none of it changed.
+  The CLI dispatch is purely an entry-point concern, like
+  v4.
+- **No new third-party dependencies.** Stdlib `reflect` +
+  `cobra` (already in go.mod from v4). The args struct
+  schema comes from the existing `jsonschema:` tags.
+- **New stdout invariant carve-out.** Per-tool
+  subcommands are the one legitimate stdout writer in
+  the binary. The `stdio` and `serve` transports keep
+  their "stdout is the JSON-RPC wire" discipline — they
+  re-inject the dispatcher output back through the wire,
+  not directly to stdout.
+
+#### What didn't change
+
+- The 18 tool names. `mcp_confluence_conf_get` is still
+  the wire identifier on both transports (after the
+  server prefix). The per-tool subcommands use the same
+  names minus the prefix — `conf_get` not
+  `mcp_confluence_conf_get` — because they're invoked
+  from the shell, not from an MCP host.
+- The 5 CRUD tool descriptions, the 6 convenience helper
+  descriptions, the 3 markdown round-trip descriptions,
+  the 3 attachment descriptions, the 1 drawio
+  description — all byte-identical to upstream
+  `@aashari/mcp-server-atlassian-confluence` v3.3.0.
+- `internal/config/dotenv.go`. Q22-locked; the 30-LOC
+  stdlib parser and its 171-line test module are
+  unchanged.
+- The settings resolution order: **CLI flag > process
+  env > cwd `.env` > binary-dir `.env`** — Q22's locked
+  tiers, with the upper two tiers now served by viper
+  and the lower two by the stdlib parser (composition).
+  Per-tool subcommands inherit this verbatim.
+- The JSON-RPC stdout invariant for the `stdio` and
+  `serve` transports (every byte on stdout is JSON-RPC
+  or HTTP framing; help, version, errors, logs on
+  stderr). The v5 carve-out is a precise exception for
+  the per-tool CLI path, not a relaxation.
+
+#### Dev-velocity outcome (the user's stated goal)
+
+For 99% of dev iterations on a specific tool, the loop is
+now:
+
+```
+make build
+./bin/mcp-confluence conf_get --path=/wiki/api/v2/spaces?limit=2
+./bin/mcp-confluence conf_get_page_markdown --pageId=163935 | jq .markdown
+```
+
+No Hermes restart. No JSON-RPC envelope. No
+`mcp.Server` round-trip. The terminal is the dev loop;
+Hermes registration stays the final integration smoke
+(Phase 19). The `stdio` and `serve` subcommands are
+preserved as the canonical MCP-host integration paths —
+they are now two of three entry points (the third being
+the 18 per-tool subcommands), not the only ones.
+

@@ -272,6 +272,105 @@ instead of newline-delimited JSON over a stdio fd.
 > Caddy, Envoy) in front of `--listen`. A future v1.x may add
 > native `--tls-cert` / `--tls-key` flags.
 
+### Per-tool subcommands (v5)
+
+Each of the 18 MCP tools is also exposed as a first-class
+cobra subcommand — invoke directly from the shell, a
+Makefile target, a shell script, or a `jq` pipeline. The
+`v5` plan (Phases 20-22) wires 18 new subcommands on top
+of the same `Handle*` functions the MCP transports invoke;
+the CLI surface returns **byte-identical output** to a
+`tools/call` JSON-RPC invocation. The dev-velocity loop
+the user asked for becomes: rebuild → run subcommand → see
+output → repeat, with no Hermes restart, no `hermes mcp
+test confluence` round-trip, and no JSON-RPC framing.
+
+**The 18 per-tool subcommands** (verbatim, frozen names):
+
+| Subcommand | Args required | MCP tool |
+| --- | --- | --- |
+| `conf_get` | `--path` | `conf_get` |
+| `conf_post` | `--path`, `--body` | `conf_post` |
+| `conf_put` | `--path`, `--body` | `conf_put` |
+| `conf_patch` | `--path`, `--body` (RFC 6902 JSON Patch array) | `conf_patch` |
+| `conf_delete` | `--path` | `conf_delete` |
+| `conf_list_spaces` | (optional `--limit`, `--cursor`, `--type`, `--status`) | `conf_list_spaces` |
+| `conf_list_pages` | `--space-id` *or* `--space-key` (optional `--title`, `--status`, `--limit`, `--cursor`, `--sort`, `--body-format`) | `conf_list_pages` |
+| `conf_get_page_body` | `--page-id` (optional `--body-format`: `storage` / `view` / `atlas_doc_format`) | `conf_get_page_body` |
+| `conf_get_page_tree` | `--page-id` (optional `--limit`, `--depth`) | `conf_get_page_tree` |
+| `conf_search` | `--cql` (optional `--limit`, `--start`, `--excludedContent`) | `conf_search` |
+| `conf_help` | (optional `--topic`) | `conf_help` |
+| `conf_post_markdown` | `--space-id`, `--title`, (`--markdown` *or* `--markdownFile`) | `conf_post_markdown` |
+| `conf_put_markdown` | `--page-id`, (`--title` optional), (`--markdown` *or* `--markdownFile`) | `conf_put_markdown` |
+| `conf_get_page_markdown` | `--page-id` | `conf_get_page_markdown` |
+| `conf_upload_attachment` | `--page-id`, `--file-path` (optional `--comment`, `--minorEdit`) | `conf_upload_attachment` |
+| `conf_list_attachments` | `--page-id` (optional `--cursor`, `--limit`, `--mediaType`, `--filename`) | `conf_list_attachments` |
+| `conf_delete_attachment` | `--attachment-id` (optional `--purge`) | `conf_delete_attachment` |
+| `conf_upload_drawio` | (`--pageId` *or* `--spaceId`+`--title`) + (`--drawioFile` *or* `--drawioPngFile` *or* `--drawioSvgFile`) | `conf_upload_drawio` |
+
+**Why v5 exists (the dev-velocity loop).** Each per-tool
+subcommand is a thin 1:1 shell adapter over the same
+`Handle*` function the MCP `tools/call` transport invokes.
+The dispatch is centralized in
+`cmd/mcp-confluence/cli_tool_dispatch.go`; per-tool files
+`cli_tool_crud.go`, `cli_tool_convenience.go`,
+`cli_tool_markdown.go`, `cli_tool_attachments.go`, and
+`cli_tool_drawio.go` are factories that call into the
+dispatcher. The two transports and the CLI surface all hit
+the same `internal/tools/` package — no shadow handler, no
+parallel implementation. The CLI path is the dev loop;
+Hermes registration is the final integration smoke (already
+verified in Phase 19).
+
+**Flag generation is reflection-driven.** The args struct
+that the MCP server already exposes (the one whose
+`jsonschema:"description=...,required"` tags feed
+`tools/list`) is also reflected over to drive cobra flag
+registration. One source of truth: change a description in
+the args struct, and both the MCP `tools/list` response and
+the subcommand's `--help` text update on the next build.
+See `bindFlagsFromArgsStruct` in
+`cmd/mcp-confluence/cli_tool_dispatch.go`.
+
+**JSON-RPC stdout invariant — NEW v5 EXCEPTION.** The
+per-tool subcommands are the **ONE** legitimate stdout
+writer in the binary. Tool results print to stdout so they
+can be piped to `jq`, to a file, to `pbcopy`, to a Makefile
+recipe. The "stdout is reserved for the JSON-RPC stream"
+rule still holds for the `stdio` and `serve` transports
+(where stdout is the wire). It does **NOT** apply when a
+per-tool subcommand is invoked directly from the shell.
+This is the one carve-out, and it is the load-bearing
+piece that makes the dev-velocity loop work.
+
+**Output formats (available on every subcommand).**
+
+- Default: TOON-encoded (30-60% fewer tokens than JSON).
+- Pass `--outputFormat=json` to get raw JSON.
+- Pass `--jq='expr'` to filter via JMESPath. Short-circuits
+  to no parse cost when the path is the only thing you
+  want, e.g. `--jq='results[*].{id: id, title: title}'`.
+
+**Security.** API token via `--api-token` flag *or*
+`ATLASSIAN_API_TOKEN` env var. Flag wins (Q22 composition).
+The token is **never** logged; the startup banner on
+stderr shows only `site` + `email` (no token, no path).
+The full Q22 settings resolution order
+(flag > env > cwd `.env` > binary-dir `.env`) applies to
+the per-tool subcommands unchanged from the `stdio` and
+`serve` subcommands.
+
+**Hermes registration — unchanged.** The per-tool
+subcommands are a developer-velocity addition; they do
+**not** replace the MCP-host integration. `~/.hermes/config.yaml`
+still uses `args: ["stdio"]` (default) or
+`args: ["serve", "--listen=127.0.0.1:8080"]` — the
+per-tool subcommands are reachable only from the shell,
+not from an MCP host. The `--help` text of each per-tool
+subcommand documents the args the dispatcher binds from
+the args struct, not a Hermes YAML example (Hermes never
+invokes these).
+
 ### Subcommand matrix — what each one does
 
 | Subcommand | Transport | Stdio framing | HTTP framing | Locked behaviors |
