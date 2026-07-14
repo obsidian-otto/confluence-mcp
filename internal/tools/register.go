@@ -1,4 +1,4 @@
-// Package tools — register.go: the single point where the 17
+// Package tools — register.go: the single point where the 18
 // Confluence tool handlers are wired into a *mcp.Server.
 //
 // RegisterAll is called exactly once: from internal/server.New
@@ -85,25 +85,28 @@ import (
 	"github.com/bennie/mcp-confluence/internal/atlassian"
 )
 
-// RegisterAll wires the 13 Confluence tool handlers into srv. It is
+// RegisterAll wires the 18 Confluence tool handlers into srv. It is
 // idempotent only in the sense that mcp-golang's RegisterTool
 // overwrites any prior registration of the same name; the project
 // does not call RegisterAll twice. The function returns the first
 // registration error (if any) so the caller can surface it as a
 // fail-fast condition.
 //
-// The 13 names are: 5 CRUD tools (conf_get / conf_post / conf_put /
+// The 18 names are: 5 CRUD tools (conf_get / conf_post / conf_put /
 // conf_patch / conf_delete) byte-for-byte from the upstream
 // `@aashari/mcp-server-atlassian-confluence` v3.3.0 tool surface;
 // 5 post-v1 quality-of-life tools (conf_list_spaces / conf_list_pages
 // / conf_get_page_body / conf_search / conf_help) added in the
-// 2026-07-10 audit closure; and 3 v2 markdown round-trip tools
+// 2026-07-10 audit closure; 3 v2 markdown round-trip tools
 // (conf_post_markdown / conf_put_markdown / conf_get_page_markdown)
-// added in Phase 14/15. Do not edit the 10 upstream-aligned names
-// without re-running the byte-comparison test in
-// descriptions_test.go. server_test.go's
-// TestNew_RegistersAllThirteenTools and
-// TestNew_RegistersExactlyThirteenTools enforce the set membership
+// added in Phase 14/15; 3 v3 attachment tools (conf_upload_attachment
+// / conf_list_attachments / conf_delete_attachment); 1 v3 drawio
+// orchestrator (conf_upload_drawio); and 1 v1.x page-tree tool
+// (conf_get_page_tree, added 2026-07-14). Do not edit the 10
+// upstream-aligned names without re-running the byte-comparison test
+// in descriptions_test.go. server_test.go's
+// TestNew_RegistersAllEighteenTools and
+// TestNew_RegistersExactlyEighteenTools enforce the set membership
 // at the mcp-golang introspection layer.
 //
 // Parameter validation:
@@ -204,6 +207,18 @@ func RegisterAll(srv *mcp.Server, client *atlassian.Client) error {
 			description: CONF_GET_PAGE_BODY_DESCRIPTION,
 			handler: func(ctx context.Context, args GetPageBodyArgs) (*mcp.ToolResponse, error) {
 				return invokeTool(ctx, "conf_get_page_body", HandleGetPageBody, client, args)
+			},
+		},
+		// v1.x — Page-tree index tool (added 2026-07-14). Three
+		// v2 endpoints merged into one envelope. Wire shape
+		// documented in specs/13-page-tree-index/. Distinct from
+		// conf_list_pages (which is across-space) and conf_search
+		// (which is text-based).
+		{
+			name:        "conf_get_page_tree",
+			description: CONF_GET_PAGE_TREE_DESCRIPTION,
+			handler: func(ctx context.Context, args GetPageTreeArgs) (*mcp.ToolResponse, error) {
+				return invokeTool(ctx, "conf_get_page_tree", HandleGetPageTree, client, args)
 			},
 		},
 		{

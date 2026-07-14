@@ -156,12 +156,14 @@ func TestHandleHelp_ReturnsSurface(t *testing.T) {
 		t.Errorf("default topic = %q, want 'all'", resp.Topic)
 	}
 
-	// The full 17-tool surface: 5 CRUD + 5 convenience + 3 markdown
+	// The full 18-tool surface: 5 CRUD + 6 convenience (incl
+	// conf_get_page_tree, the v1.x page-tree-index addition) + 3 markdown
 	// + 3 attachments + 1 drawio. Keep this in sync with
 	// helpSurface() in convenience.go.
 	want := []string{
 		"conf_get", "conf_post", "conf_put", "conf_patch", "conf_delete",
 		"conf_list_spaces", "conf_list_pages", "conf_get_page_body",
+		"conf_get_page_tree",
 		"conf_search", "conf_help",
 		"conf_post_markdown", "conf_put_markdown", "conf_get_page_markdown",
 		"conf_upload_attachment", "conf_list_attachments", "conf_delete_attachment",

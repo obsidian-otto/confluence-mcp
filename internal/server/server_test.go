@@ -1,16 +1,17 @@
 // Phase 15 — server-bootstrap tests.
 //
 // The server package exposes one factory, New(deps), that returns a
-// *mcp.Server with the 13 Confluence tools (5 CRUD + 5 quality-of-life
-// + 3 markdown round-trip) already registered. These tests assert:
+// *mcp.Server with the 18 Confluence tools (5 CRUD + 6 quality-of-life
+// + 3 markdown round-trip + 3 attachments + 1 drawio orchestrator)
+// already registered. These tests assert:
 //
 //  1. New(deps) returns a non-nil *mcp.Server with no error.
-//  2. The 13 tool names are registered, in any order, and only those.
+//  2. The 18 tool names are registered, in any order, and only those.
 //  3. NewServer propagates a nil-Deps error before doing any work
 //     (defense in depth — the Phase 9 main.go pre-validates, but the
 //     factory must not crash with a nil-deref on a misbehaving caller).
 //  4. The package-level tools package (Phase 7) exposes a
-//     RegisterAll(srv, client) entry point that registers the same 13
+//     RegisterAll(srv, client) entry point that registers the same 18
 //     tools when called against a freshly constructed mcp.Server.
 //
 // We use the mcp-golang public CheckToolRegistered API for
@@ -64,12 +65,17 @@ import (
 //     .drawio / .drawio.png / .drawio.svg file AND embeds it
 //     on the page in one call (v1 multipart POST + v2 page
 //     PUT). See specs/12-drawio-attachments/01-research-and-surface.md.
+//   - 1 page-tree (conf_get_page_tree). v1.x addition 2026-07-14:
+//     merges three v2 endpoints (/ancestors, /children,
+//     /descendants) into one envelope. See
+//     specs/13-page-tree-index/01-research-and-surface.md.
 var expectedTools = []string{
 	"conf_delete",
 	"conf_delete_attachment",
 	"conf_get",
 	"conf_get_page_body",
 	"conf_get_page_markdown",
+	"conf_get_page_tree",
 	"conf_help",
 	"conf_list_attachments",
 	"conf_list_pages",
@@ -139,10 +145,10 @@ func TestNew_ConstructsServer(t *testing.T) {
 	}
 }
 
-// TestNew_RegistersAllSeventeenTools asserts the 17 tool names are
+// TestNew_RegistersAllEighteenTools asserts the 18 tool names are
 // registered with the returned server. We use the mcp-golang
 // CheckToolRegistered helper — its public surface, no internals.
-func TestNew_RegistersAllSeventeenTools(t *testing.T) {
+func TestNew_RegistersAllEighteenTools(t *testing.T) {
 	srv, err := server.New(newDeps(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
@@ -155,9 +161,9 @@ func TestNew_RegistersAllSeventeenTools(t *testing.T) {
 	}
 }
 
-// TestNew_RegistersExactlySeventeenTools asserts no extra tool is
-// registered. Today there are exactly 17; if a future phase adds a
-// 18th, this test will catch the divergence and force the contract
+// TestNew_RegistersExactlyEighteenTools asserts no extra tool is
+// registered. Today there are exactly 18; if a future phase adds a
+// 19th, this test will catch the divergence and force the contract
 // to be re-confirmed. We assert by enumerating the registered set
 // via the public introspection helper and comparing against
 // expectedTools. Because mcp-golang does not expose a public "list
@@ -167,7 +173,7 @@ func TestNew_RegistersAllSeventeenTools(t *testing.T) {
 // so we use a "no extra surprises" smoke check: each expected name
 // is present, and a small set of names that MUST NOT exist (e.g.
 // obvious typos, wrong verb casing) are absent.
-func TestNew_RegistersExactlySeventeenTools(t *testing.T) {
+func TestNew_RegistersExactlyEighteenTools(t *testing.T) {
 	srv, err := server.New(newDeps(t))
 	if err != nil {
 		t.Fatalf("server.New: %v", err)

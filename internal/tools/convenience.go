@@ -365,6 +365,21 @@ func helpSurface() map[string]helpEntry {
 			},
 			Example: `conf_get_page_body page-id="163935" body-format="storage"`,
 		},
+		// v1.x — 3-endpoint orchestrator. See
+		// specs/13-page-tree-index/ for why "indexes" don't exist
+		// v1.x — 3-endpoint orchestrator. See
+		// specs/13-page-tree-index/ for why "indexes" don't exist
+		// in Confluence v2 and this is the closest analogue.
+		"conf_get_page_tree": {
+			Description: firstParagraph(CONF_GET_PAGE_TREE_DESCRIPTION),
+			Args: map[string]string{
+				"page-id":      "Numeric page id whose tree position to fetch (required)",
+				"limit":        "Per-subcall cap on ancestors/children/descendants (default 25, max 250)",
+				"depth":        "Descendants-only recursion depth (default 1, max 10); ignored for ancestors/children",
+				"outputFormat": "empty = TOON; 'json' for plain JSON",
+			},
+			Example: `conf_get_page_tree page-id="163935" depth=3`,
+		},
 		"conf_search": {
 			Description: firstParagraph(CONF_SEARCH_DESCRIPTION),
 			Args: map[string]string{
@@ -528,6 +543,116 @@ func firstParagraph(s string) string {
 		}
 	}
 	return out.String()
+}
+
+// HandleGetPageTree is the `conf_get_page_tree` handler. It is
+// the one multi-call orchestrator in the convenience layer — it
+// fans out three v2 REST GETs (ancestors, children, descendants)
+// and merges their envelopes into a single response.
+//
+// Why three calls and not one:
+//
+//	Confluence Cloud v2 has no single "tree position of a page"
+//	endpoint — the ancestors / children / descendants split is a
+//	v2-API design choice (verified against
+//	skills/rest/atlassian-rest/assets/cloud-confluence.openapi.json
+//	on 2026-07-13). The upstream Node.js tool
+//	`@aashari/mcp-server-atlassian-confluence` v3.3.0 also has no
+//	equivalent tool — this is a local addition. See
+//	specs/13-page-tree-index/01-research-and-surface.md.
+//
+// Why not executeRequest:
+//
+//	The executeRequest pipeline encodes/JMESPaths/truncates each
+//	sub-call independently, but the response shape we want is one
+//	MERGED envelope. Calling executeRequest three times would
+//	give back three separate TOON-encoded strings (or worse, three
+//	strings that each went through a different JMESPath filter).
+//	We instead call client.Call directly, get the three decoded
+//	envelopes as map[string]any, merge them under
+//	`{pageId, ancestors, children, descendants}`, and run the
+//	output-format choice (TOON vs JSON) once at the end. The
+//	JMESPath pass is omitted in v1 — see the trade-off note in
+//	the spec.
+//
+// Sequential sub-calls:
+//
+//	v1 runs the three sub-calls sequentially because adding an
+//	errgroup fan-out would require error-handling machinery the
+//	rest of the package doesn't use. Sequential keeps the
+//	implementation symmetric with HandleListPages /
+//	HandleGetPageBody. A v2 can swap in an errorgroup without
+//	changing the wire shape if profiling shows the latency hit
+//	matters.
+func HandleGetPageTree(ctx context.Context, client *atlassian.Client, args json.RawMessage) (string, error) {
+	var a GetPageTreeArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", fmt.Errorf("conf_get_page_tree: decode args: %w", err)
+	}
+	if a.PageID == "" {
+		return "", fmt.Errorf("conf_get_page_tree: page-id is required")
+	}
+
+	// Clamp limit/depth to safe ranges. Out-of-range values fall
+	// back to the endpoint default (empty string), matching the
+	// rest of the convenience layer's "stripEmpty" pattern.
+	limit := ""
+	if a.Limit >= 1 && a.Limit <= 250 {
+		limit = strconv.Itoa(a.Limit)
+	}
+	depth := ""
+	if a.Depth >= 1 && a.Depth <= 10 {
+		depth = strconv.Itoa(a.Depth)
+	}
+
+	// Sub-call 1: ancestors. No cursor (the chain is bounded
+	// by space depth, not result count).
+	ancestors, err := client.Call(ctx, "GET",
+		"/wiki/api/v2/pages/"+a.PageID+"/ancestors",
+		map[string]string{"limit": limit},
+		nil,
+	)
+	if err != nil {
+		return "", fmt.Errorf("conf_get_page_tree: ancestors sub-call: %w", err)
+	}
+
+	// Sub-call 2: children. Cursor-paginated.
+	children, err := client.Call(ctx, "GET",
+		"/wiki/api/v2/pages/"+a.PageID+"/children",
+		map[string]string{"limit": limit},
+		nil,
+	)
+	if err != nil {
+		return "", fmt.Errorf("conf_get_page_tree: children sub-call: %w", err)
+	}
+
+	// Sub-call 3: descendants. Cursor-paginated, depth-controlled.
+	descendantsQuery := map[string]string{"limit": limit}
+	if depth != "" {
+		descendantsQuery["depth"] = depth
+	}
+	descendants, err := client.Call(ctx, "GET",
+		"/wiki/api/v2/pages/"+a.PageID+"/descendants",
+		descendantsQuery,
+		nil,
+	)
+	if err != nil {
+		return "", fmt.Errorf("conf_get_page_tree: descendants sub-call: %w", err)
+	}
+
+	// Merge the three envelopes under stable keys.
+	merged := map[string]any{
+		"pageId":      a.PageID,
+		"ancestors":   ancestors,
+		"children":    children,
+		"descendants": descendants,
+	}
+
+	if a.OutputFormat == "json" {
+		return jsonMarshal(merged)
+	}
+	// Default: TOON. Same encoder executeRequest uses.
+	return toonMarshal(merged)
 }
 
 // jsonMarshal is a thin wrapper over json.Marshal that errors out

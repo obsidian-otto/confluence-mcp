@@ -173,6 +173,31 @@ const CONF_GET_PAGE_BODY_DESCRIPTION = `Read a single page's body in a chosen re
 
 ` + templates.Backtick + `Returns:` + templates.Backtick + ` One object with ` + templates.Backtick + `value` + templates.Backtick + `, ` + templates.Backtick + `representation` + templates.Backtick + ` fields. For ` + templates.Backtick + `storage` + templates.Backtick + ` the value is XHTML; for ` + templates.Backtick + `view` + templates.Backtick + ` it is rendered HTML; for ` + templates.Backtick + `atlas_doc_format` + templates.Backtick + ` it is a JSON object.`
 
+// CONF_GET_PAGE_TREE_DESCRIPTION documents the conf_get_page_tree
+// tool. Local addition (the upstream has no tree-index tool); the
+// TestNewToolDescriptionsAreSubstantial test enforces the quality bar.
+const CONF_GET_PAGE_TREE_DESCRIPTION = `Get a page's tree position — ancestors (root → immediate parent), direct children, and the descendants subtree — in one call. Returns TOON format by default.
+
+` + templates.Backtick + `Use this when:` + templates.Backtick + ` You have a page id and want its position in the space tree — the breadcrumb chain above it, the direct children below it, and (optionally) the recursive descendants subtree. Distinct from ` + templates.Backtick + `conf_list_pages` + templates.Backtick + ` which lists across a whole space; this tool scopes to a single page's neighborhood. Distinct from CQL search (` + templates.Backtick + `conf_search` + templates.Backtick + `) which is text-based and would miss structural position.
+
+` + templates.Backtick + `Wire shape:` + templates.Backtick + ` Internally fans out three v2 REST GETs and merges their envelopes into one response:
+- ` + templates.Backtick + `GET /wiki/api/v2/pages/{id}/ancestors` + templates.Backtick + ` — root → immediate-parent chain, oldest first.
+- ` + templates.Backtick + `GET /wiki/api/v2/pages/{id}/children` + templates.Backtick + ` — direct child pages only (cursor pagination available).
+- ` + templates.Backtick + `GET /wiki/api/v2/pages/{id}/descendants` + templates.Backtick + ` — full subtree (recursion depth controlled by ` + templates.Backtick + `depth` + templates.Backtick + `; cursor pagination available; v2 defaults depth=1).
+
+All three sub-calls return the standard v2 ` + templates.Backtick + `MultiEntityResult<T>` + templates.Backtick + ` envelope (` + templates.Backtick + `{results: [...], _links.next}` + templates.Backtick + `); the merged response keeps those envelopes verbatim under ` + templates.Backtick + `ancestors` + templates.Backtick + `, ` + templates.Backtick + `children` + templates.Backtick + `, ` + templates.Backtick + `descendants` + templates.Backtick + ` keys.
+
+` + templates.Backtick + `Why three calls:` + templates.Backtick + ` Confluence's Cloud v2 REST has no single "get page tree position" endpoint — the ancestors/children/descendants split is a v2-API design choice (verified against ` + templates.Backtick + `dac-static.atlassian.com/cloud/confluence/openapi-v2.v3.json` + templates.Backtick + ` on 2026-07-13). ` + templates.Backtick + `confluence/v2/` + templates.Backtick + ` in the ` + templates.Backtick + `ctreminiom/go-atlassian/v2` + templates.Backtick + ` library is a stub (only OAuth boilerplate), so the sub-calls go through raw HTTP via ` + templates.Backtick + `atlassian.Client.Call` + templates.Backtick + `.
+
+` + templates.Backtick + `When NOT to use this:` + templates.Backtick + `
+- For listing ALL pages across a space (not the tree around one page), use ` + templates.Backtick + `conf_list_pages` + templates.Backtick + ` — it queries ` + templates.Backtick + `/wiki/api/v2/pages?space-id=...` + templates.Backtick + ` directly.
+- For text-based search across the workspace, use ` + templates.Backtick + `conf_search` + templates.Backtick + ` with CQL.
+- For deep recursive subtree dumps, set ` + templates.Backtick + `depth` + templates.Backtick + ` carefully: at ` + templates.Backtick + `depth=10` + templates.Backtick + ` a deep page can return tens of thousands of descendants and may trip the 40k-char truncation threshold in ` + templates.Backtick + `executeRequest` + templates.Backtick + `.
+
+` + templates.Backtick + `Output format:` + templates.Backtick + ` TOON (default) or JSON (` + templates.Backtick + `outputFormat: "json"` + templates.Backtick + `).
+
+` + templates.Backtick + `Returns:` + templates.Backtick + ` Merged envelope ` + templates.Backtick + `{pageId, ancestors: {results, _links}, children: {results, _links}, descendants: {results, _links}}` + templates.Backtick + `. Each ` + templates.Backtick + `results` + templates.Backtick + ` array contains the v2 page summary records (` + templates.Backtick + `id, title, status, spaceId, parentId, version` + templates.Backtick + `) verbatim. Use ` + templates.Backtick + `jq` + templates.Backtick + ` to flatten, e.g. ` + templates.Backtick + `jq: "{ancestors: ancestors.results[*].{id: id, title: title}}"` + templates.Backtick + `.`
+
 // CONF_SEARCH_DESCRIPTION documents the conf_search tool.
 const CONF_SEARCH_DESCRIPTION = `Search Confluence via Confluence Query Language (CQL). Returns TOON format by default.
 
@@ -196,9 +221,9 @@ const CONF_SEARCH_DESCRIPTION = `Search Confluence via Confluence Query Language
 // tool. The full tool surface map lives in the response.
 const CONF_HELP_DESCRIPTION = `Show how to use the confluence MCP server — the tool surface in one call.
 
-` + templates.Backtick + `Use this when:` + templates.Backtick + ` You have just discovered the ` + templates.Backtick + `mcp_confluence_*` + templates.Backtick + ` tool prefix and want a tour, or you are not sure which of the thirteen tools fits the task.
+` + templates.Backtick + `Use this when:` + templates.Backtick + ` You have just discovered the ` + templates.Backtick + `mcp_confluence_*` + templates.Backtick + ` tool prefix and want a tour, or you are not sure which of the eighteen tools fits the task.
 
-` + templates.Backtick + `Response shape:` + templates.Backtick + ` Object with one entry per tool — ` + templates.Backtick + `conf_get, conf_post, conf_put, conf_patch, conf_delete, conf_list_spaces, conf_list_pages, conf_get_page_body, conf_search, conf_help, conf_post_markdown, conf_put_markdown, conf_get_page_markdown` + templates.Backtick + `. For each tool:
+` + templates.Backtick + `Response shape:` + templates.Backtick + ` Object with one entry per tool — ` + templates.Backtick + `conf_get, conf_post, conf_put, conf_patch, conf_delete, conf_list_spaces, conf_list_pages, conf_get_page_body, conf_get_page_tree, conf_search, conf_help, conf_post_markdown, conf_put_markdown, conf_get_page_markdown, conf_upload_attachment, conf_list_attachments, conf_delete_attachment, conf_upload_drawio` + templates.Backtick + `. For each tool:
 - ` + templates.Backtick + `description` + templates.Backtick + `: short purpose (one sentence).
 - ` + templates.Backtick + `args` + templates.Backtick + `: top-level fields with one-line descriptions.
 - ` + templates.Backtick + `example` + templates.Backtick + `: a single concrete invocation.
