@@ -4,14 +4,26 @@
 > project. The deep technical content lives in `specs/`; this
 > file summarizes and points — it doesn't replace.
 >
+> **What this project is (post-2026-07-14 CLI refactor):** A
+> Confluence MCP server packaged as a **CLI app**. The single
+> `mcp-confluence` binary exposes four subcommands — `stdio`
+> (default; serve the 18 MCP tools over JSON-RPC on stdio, the
+> classic Hermes-MCP-server mode), `serve` (serve the same 18
+> tools over a TCP/HTTP transport), and `help`/`version`. All
+> subcommands share a single process, a single tool surface,
+> and the locked Q22 settings-resolution order.
+>
 > **Implementation status: COMPLETE.** As of 2026-07-14 the
 > Go source tree (`cmd/` + `internal/`) is fully written:
 > **18 MCP tools** wired through a single `executeRequest()`
 > pipeline (the 18th, `conf_get_page_tree`, landed 2026-07-14),
-> 163 test functions, a distroless OCI image produced by `make image`. The phased delivery log lives in
-> `IMPLEMENTATION_PLAN.md`; this file documents the **what
-> exists today**, the **how it is laid out**, and the **few
-> hard rules** an agent must follow when touching it.
+> served over **two transports** (stdio + TCP/HTTP) selected
+> by `mcp-confluence {stdio|serve}`. 163+ test functions, a
+> distroless OCI image produced by `make image`. The phased
+> delivery log lives in `IMPLEMENTATION_PLAN.md`; this file
+> documents the **what exists today**, the **how it is laid
+> out**, and the **few hard rules** an agent must follow when
+> touching it.
 
 ## Purpose
 
@@ -19,15 +31,30 @@
 > "This is a golang project to build a working Confluence MCP for
 > Hermes agent."
 
-A Confluence MCP server in Go that Hermes Agent can register as
-a stdio MCP server. The binary is a single static Go
-executable that exposes **18 tools** over the JSON-RPC stdio
-transport:
+A Confluence MCP server written in Go, packaged as a **CLI
+app**. The binary is a single static Go executable that exposes
+**18 tools** over the JSON-RPC protocol on two transports:
+stdio (the classic MCP-server mode; Hermes MCP host pipes
+JSON-RPC over stdin/stdout) and TCP/HTTP (new in this refactor;
+Hermes MCP host opens an HTTP connection to `--listen`).
+Subcommands are selected by the first positional argument:
+
+| Subcommand | Transport | Use case |
+| ---------- | --------- | -------- |
+| `mcp-confluence` (no args, or `stdio`) | **stdio** JSON-RPC | Default. Same behavior as the v0.1 binary. Hermes `mcp_servers:` block invokes with `args: ["stdio"]` (or `args: []`). |
+| `mcp-confluence serve` | **TCP/HTTP** | Run as a network-accessible MCP server. Hermes `mcp_servers:` block invokes with `args: ["serve", "--listen=127.0.0.1:8080"]`. Wire format: same JSON-RPC 2.0 messages as stdio, framed by HTTP request/response. |
+| `mcp-confluence --help` | n/a | Print the cobra-generated root-command help (routed to stderr; stdout is reserved for JSON-RPC). |
+| `mcp-confluence --version` | n/a | Print `mcp-confluence version v0.x.y` and exit. Injected at build time via `-ldflags -X main.version=<x>` (see `cmd/mcp-confluence/main.go:54`). |
+
+The 18 tools are byte-for-byte identical across both
+transports — `tools.RegisterAll(srv, client)` is shared, so
+`mcp__confluence_conf_get` returns the same JSON whether called
+over stdio or HTTP:
 
 | Group | Tools | Provenance |
 | ----- | ----- | ---------- |
 | CRUD (upstream parity) | `conf_get`, `conf_post`, `conf_put`, `conf_patch`, `conf_delete` | byte-for-byte port of `@aashari/mcp-server-atlassian-confluence` v3.3.0 — descriptions verbatim from upstream, name set locked by `server_test.go` |
-| Convenience helpers | `conf_list_spaces`, `conf_list_pages`, `conf_get_page_body`, `conf_search`, `conf_help` | added in the 2026-07-10 audit closure (`specs/99-gap-questions/04-post-v1-audit-2026-07-10-closed.md`) |
+| Convenience helpers | `conf_list_spaces`, `conf_list_pages`, `conf_get_page_body`, `conf_get_page_tree`, `conf_search`, `conf_help` | added in the 2026-07-10 audit closure (`specs/99-gap-questions/04-post-v1-audit-2026-07-10-closed.md`) and 2026-07-14 page-tree-index addition (`specs/13-page-tree-index/`) |
 | Markdown round-trip (v2) | `conf_post_markdown`, `conf_put_markdown`, `conf_get_page_markdown` | added 2026-07-10 per user's verbatim requirement (see below) |
 | Attachments (v3) | `conf_upload_attachment`, `conf_list_attachments`, `conf_delete_attachment` | binary uploads via v1 REST, list/delete via v2 (`specs/11-attachments`) |
 | drawio orchestrator (v3) | `conf_upload_drawio` | upload + embed in one call (`specs/12-drawio-attachments`) |
@@ -36,7 +63,244 @@ All 18 handlers funnel through a single `executeRequest()`
 helper in `internal/tools/` that runs the 9-step pipeline:
 URL build → call → JSON decode → JMESPath filter (if `jq`) →
 TOON encode → 40k truncation (if oversized) → typed API error
-wrap → panics via `safeHandler`.
+wrap → panics via `safeHandler`. The pipeline is the same for
+both transports — only the framing differs.
+
+## CLI surface (the load-bearing piece of this refactor)
+
+The binary is a cobra app with one root command and four
+subcommands. The CLI is **additive** — every setting the CLI
+can accept is also settable via env vars (the locked Q22
+surface), so a Hermes config that omits CLI flags and just
+supplies env vars is also valid. Flags are bound to viper;
+viper's `AutomaticEnv()` falls through to the existing
+`internal/config/dotenv.go` (Q22) on a missing flag.
+
+### `--help` (root command)
+
+```
+$ mcp-confluence --help
+Confluence MCP server (stdlib JSON-RPC + TCP/HTTP transports)
+
+Usage:
+  mcp-confluence [command] [flags]
+
+Commands:
+  stdio        Serve the 18 MCP tools over JSON-RPC on stdin/stdout (default)
+  serve        Serve the 18 MCP tools over TCP/HTTP JSON-RPC
+  help         Help about any command
+
+Flags:
+      --site string       Confluence site prefix (overrides ATLASSIAN_SITE_NAME)
+      --email string      Atlassian account email (overrides ATLASSIAN_USER_EMAIL)
+      --api-token string  Atlassian API token (overrides ATLASSIAN_API_TOKEN)
+      --debug             Enable verbose stderr logging
+      --config string     Path to a viper-compatible config file (YAML/JSON/TOML/INI)
+  -h, --help              help for mcp-confluence
+  -v, --version           version for mcp-confluence
+
+Run "mcp-confluence [command] --help" for command-specific help.
+
+ENV VARS:
+  ATLASSIAN_SITE_NAME       Confluence site prefix (e.g. "smartergroup")
+  ATLASSIAN_USER_EMAIL      Atlassian account email
+  ATLASSIAN_API_TOKEN       Atlassian API token (NEVER log; required)
+  DEBUG                     Set to "true" to enable verbose stderr logging
+
+RESOLUTION ORDER (per locked Q22):
+  1. CLI flags (--site, --email, --api-token, --debug, --config)
+  2. Process environment (ATLASSIAN_* above, including DEBUG)
+  3. .env file in the current working directory
+  4. .env file next to the binary
+
+HERMES INTEGRATION — stdio mode:
+  In ~/.hermes/config.yaml:
+    mcp_servers:
+      confluence:
+        command: /path/to/mcp-confluence
+        args: ["stdio"]            # or [] for default
+        env:
+          ATLASSIAN_SITE_NAME: smartergroup
+          ATLASSIAN_USER_EMAIL: "you@example.com"
+          ATLASSIAN_API_TOKEN:  "${ATLASSIAN_API_TOKEN}"
+
+HERMES INTEGRATION — serve (TCP/HTTP) mode:
+  In ~/.hermes/config.yaml:
+    mcp_servers:
+      confluence:
+        command: /path/to/mcp-confluence
+        args: ["serve", "--listen=127.0.0.1:8080"]
+        env:
+          ATLASSIAN_SITE_NAME: smartergroup
+          ATLASSIAN_USER_EMAIL: "you@example.com"
+          ATLASSIAN_API_TOKEN:  "${ATLASSIAN_API_TOKEN}"
+```
+
+### `stdio` subcommand (default)
+
+```
+$ mcp-confluence stdio --help
+Serve the 18 MCP tools over JSON-RPC on stdin/stdout (default).
+
+Usage:
+  mcp-confluence stdio [flags]
+
+Flags:
+      --site string       ...
+      --email string      ...
+      --api-token string  ...
+      --debug             ...
+      --config string     ...
+  -h, --help              help for stdio
+
+Run "mcp-confluence stdio" with no args for the canonical MCP-server
+mode. Stdin receives JSON-RPC requests; stdout emits JSON-RPC
+responses; stderr holds lifecycle + per-call debug logs. EOF on
+stdin cancels the context and the process exits cleanly.
+```
+
+**Hermes registration (canonical mode — unchanged from v0.1):**
+
+```yaml
+# ~/.hermes/config.yaml — stdio mode (default)
+mcp_servers:
+  confluence:
+    command: /path/to/bin/mcp-confluence
+    args: ["stdio"]                  # or [] — `stdio` is default
+    env:
+      ATLASSIAN_SITE_NAME: ${WORKSPACE_SITE}        # e.g. "smartergroup"
+      ATLASSIAN_USER_EMAIL: ${WORKSPACE_EMAIL}
+      ATLASSIAN_API_TOKEN: ${WORKSPACE_API_TOKEN}
+```
+
+Equivalent (CLI flags override the same env vars):
+
+```yaml
+mcp_servers:
+  confluence:
+    command: /path/to/bin/mcp-confluence
+    args: ["stdio",
+           "--site=smartergroup",
+           "--email=you@example.com",
+           "--api-token=${ATLASSIAN_API_TOKEN}"]
+    env: {}                            # all config via flags
+```
+
+### `serve` subcommand (TCP/HTTP transport — new in this refactor)
+
+```
+$ mcp-confluence serve --help
+Serve the 18 MCP tools over TCP/HTTP JSON-RPC.
+
+Wire format:  HTTP POST /mcp with body {"jsonrpc":"2.0",...}
+              returning the JSON-RPC response object.
+Auth:         The Atlassian API token is read from env/flag at startup,
+              never from the HTTP request (no bearer auth on /mcp; the
+              binary already holds the credential).
+
+Usage:
+  mcp-confluence serve [flags]
+
+Flags:
+      --listen string     host:port to bind. Default 127.0.0.1:8080.
+                          Set to 0.0.0.0:8080 ONLY behind a trusted reverse proxy.
+      --site string       ...
+      --email string      ...
+      --api-token string  ...
+      --debug             ...
+      --config string     ...
+  -h, --help              help for serve
+
+Examples:
+  # Bind to localhost only (most common; dev/test):
+  $ mcp-confluence serve --listen=127.0.0.1:8080
+
+  # Bind to a private IP (when the MCP host runs on a different VM):
+  $ mcp-confluence serve --listen=192.168.1.50:8080
+
+RUN MODES:
+  serve  Listens on --listen forever; sends a startup banner to stderr.
+         Logs each HTTP request method+path to stderr.
+
+HERMES REGISTRATION:
+  In ~/.hermes/config.yaml:
+    mcp_servers:
+      confluence:
+        command: /path/to/bin/mcp-confluence
+        args: ["serve", "--listen=127.0.0.1:8080"]
+        env:
+          ATLASSIAN_SITE_NAME: smartergroup
+          ATLASSIAN_USER_EMAIL: "you@example.com"
+          ATLASSIAN_API_TOKEN:  "${ATLASSIAN_API_TOKEN}"
+
+SECURITY:
+  - No bearer auth on /mcp — the binary holds the credential,
+    not the caller. Bind to 127.0.0.1 by default; never expose
+    to 0.0.0.0 on a shared network without a reverse proxy that
+    enforces your auth model.
+  - The HTTP frame carries JSON-RPC, not plaintext Atlassian
+    tokens. The Atlassian API token is read once at startup
+    and is never sent in any HTTP response.
+  - The TCP listener fails closed: if --listen cannot bind,
+    the process exits non-zero with an error on stderr.
+```
+
+**Hermes registration (TCP/HTTP mode):**
+
+```yaml
+# ~/.hermes/config.yaml — TCP/HTTP mode (new in this refactor)
+mcp_servers:
+  confluence:
+    command: /path/to/bin/mcp-confluence
+    args: ["serve", "--listen=127.0.0.1:8080"]
+    env:
+      ATLASSIAN_SITE_NAME: smartergroup
+      ATLASSIAN_USER_EMAIL: "you@example.com"
+      ATLASSIAN_API_TOKEN: "${ATLASSIAN_API_TOKEN}"
+```
+
+The TCP/HTTP mode is operationally equivalent to stdio from
+Hermes's point of view: same JSON-RPC 2.0 messages, same tool
+names (`mcp_confluence_conf_*`), same response envelope. The
+only difference is the framing — JSON-RPC over
+`Content-Type: application/json` HTTP request/response
+instead of newline-delimited JSON over a stdio fd.
+
+> **Note:** the TCP listener uses `net/http`, not TLS. If you
+> need TLS termination, put a reverse proxy (e.g. nginx,
+> Caddy, Envoy) in front of `--listen`. A future v1.x may add
+> native `--tls-cert` / `--tls-key` flags.
+
+### Subcommand matrix — what each one does
+
+| Subcommand | Transport | Stdio framing | HTTP framing | Locked behaviors |
+| ---------- | --------- | ------------- | ------------ | ---------------- |
+| (none / `stdio`) | stdio | newline-delimited JSON-RPC | n/a | stdout = JSON-RPC only; stderr = logs |
+| `serve` | TCP/HTTP | n/a | HTTP POST /mcp | stdout = JSON-RPC + HTTP framing only |
+| `--help` / `--version` | n/a | n/a | n/a | routes help/version to **stderr**; binary exits 0 |
+| `help <subcommand>` | n/a | n/a | n/a | same; `--help` is the cobra short form |
+
+> **All four subcommands** share the locked Q22 settings
+> resolution. There is no `--config` flag on `--help` or
+> `version` — those subcommands read no config (they are
+> parse-and-exit).
+
+### Adding a new subcommand
+
+Three places must change (per the existing tool-addition
+checklist in § Developer Guidelines):
+
+1. The `subcommands` array literal in `cmd/mcp-confluence/main.go`
+   (the cobra `Command.AddCommand(...)` block at the bottom
+   of the root-command builder).
+2. The `func newXxxCmd() *cobra.Command` builder, with a
+   complete `--help` template (no skipped sections).
+3. The `cmd/mcp-confluence/cli_test.go` `TestRoot_Help` and
+   per-subcommand help test, ensuring every subcommand's
+   `--help` text has a `HERMES REGISTRATION` example. This is
+   the load-bearing piece — the `--help` texts are the docs
+   Hermes's MCP-host config relies on, and the test prevents
+   drift.
 
 ## Project goal — bidirectional Markdown ↔ Confluence storage
 
@@ -127,6 +391,24 @@ second-guess them.
    are `mcp_confluence_conf_get`, etc.
    `server_test.go`'s `TestNew_RegistersAllEighteenTools` and
    `TestNew_RegistersExactlyEighteenTools` enforce the set.
+8. **CLI stdout discipline (POST-CLI-REFACTOR).** Every log
+   goes to stderr. `fmt.Println` to stdout is **forbidden**
+   even on the `serve` (TCP/HTTP) subcommand — stdout is
+   still reserved for the JSON-RPC byte stream of any
+   subprocess the parent might pipe it to. Cobra defaults
+   to writing `--help` and `--version` to stdout; the root
+   command therefore sets `rootCmd.SetOut(io.Discard)` and
+   `rootCmd.SetErr(os.Stderr)` BEFORE `Execute()` so help
+   text routes to stderr instead.
+9. **TCP listener default is `127.0.0.1:8080` and fails closed.**
+   The `serve` subcommand binds `--listen` literally. The
+   `--listen` flag validates that the bind resolves and
+   refuses to fall back to a different address on bind
+   failure (no security-by-obscurity default flip). For
+   shared-network deployments, place a reverse proxy in
+   front; do NOT weaken the bind-validation rule. See
+   § "Hard rule #9" in this list and the SECURITY block in
+   `mcp-confluence serve --help`.
 
 ## Tech Stack
 
@@ -135,11 +417,14 @@ second-guess them.
 | Implementation language | **Go** (see `go.mod`) |
 | Module path | `github.com/bennie/mcp-confluence` |
 | Binary name | `mcp-confluence` |
-| Entry point | `cmd/mcp-confluence/main.go` |
+| CLI framework | `github.com/spf13/cobra` v1.10.2 — root + `stdio` + `serve` subcommands, persistent flags, `SetOut(io.Discard)` for JSON-RPC-safe `--help` |
+| Config framework | `github.com/spf13/viper` v1.21.0 — flag ⇄ env ⇄ config-file precedence; `SetEnvPrefix("ATLASSIAN")` + `AutomaticEnv()` |
+| Entry point | `cmd/mcp-confluence/main.go` (now hosts the cobra root-command builder) |
 | Build system | Go modules + **Makefile** (single source of truth) |
 | Container image | `pack build` + **Paketo Go BuildPak** (`paketobuildpacks/builder-jammy-tiny`, distroless) — `make image` |
 | Atlassian HTTP | Raw `Client.HTTP.Do` against the v1 + v2 REST surfaces (`specs/03-go-atlassian/01-package-layout.md` explains why `confluence/v2/` typed services are a stub) |
-| MCP framing | `github.com/metoro-io/mcp-golang` v0.16.1 (stdio transport at v1) |
+| MCP framing — stdio | `github.com/metoro-io/mcp-golang` v0.16.1 (`stdio.NewStdioServerTransportWithIO`) |
+| MCP framing — TCP/HTTP (new) | `net/http` stdlib, single endpoint `POST /mcp`, JSON-RPC 2.0 body. See `internal/transport/http/` (added in this refactor). |
 | JSON-schema reflection (MCP) | `github.com/invopop/jsonschema` v0.12.0 |
 | JMESPath | `github.com/jmespath/go-jmespath` v0.4.0 |
 | TOON encoder | Custom ~150 LOC encoder in `internal/toon/encode.go` (no production Go library exists) |
@@ -148,9 +433,9 @@ second-guess them.
 | Storage XHTML normalizer | `github.com/PuerkitoBio/goquery` v1.12.0 |
 | drawio PNG encoding | `internal/drawio/` (custom: PNG tEXt chunk with `mxfile` keyword + URL-encoded inner XML) — see `specs/12-drawio-attachments/` |
 | External CLIs (for image) | `pack` + `docker` |
-| Hermes integration | `mcp_servers:` block in `~/.hermes/config.yaml` + stdio transport |
-| Settings source | env vars **or** `.env` file (per Q22 lock) |
-| License | MIT (goldmark + html-to-markdown both MIT; closure clean) |
+| Hermes integration | `mcp_servers:` block in `~/.hermes/config.yaml`. Choose transport per profile: `args: ["stdio"]` for the classic stdin/stdout pipe, `args: ["serve", "--listen=..."]` for the TCP/HTTP path. Both produce identical JSON-RPC tool surface. |
+| Settings source | CLI flags > **process env** > cwd `.env` > binary-dir `.env` (locked Q22 ordering; viper + the stdlib parser share the writer) |
+| License | MIT (cobra + viper both MIT; goldmark + html-to-markdown both MIT; closure clean) |
 
 ## Project Layout (current)
 
@@ -163,23 +448,27 @@ confluence-mcp/                              (Go module root)
 ├── Dockerfile                               # plain-docker fallback for `make docker-build`
 ├── project.toml                              # Paketo build descriptor
 ├── README.md                                 # project overview
-├── IMPLEMENTATION_PLAN.md                    # 16-phase delivery log (Phases 0-15, all checked)
+├── IMPLEMENTATION_PLAN.md                    # 16-phase delivery log (Phases 0-15) + Phase 16 (CLI refactor)
 ├── cmd/
 │   └── mcp-confluence/
-│       ├── main.go                           # entrypoint: load config, build client, build server, serve
-│       └── main_test.go                      # 4 lifecycle tests (no env, valid env, missing env, token never logged)
+│       ├── main.go                           # cobra root command builder + stdio/serve subcommand dispatch + lifecycle
+│       ├── main_test.go                      # lifecycle tests (no env, valid env, missing env, token never logged)
+│       ├── cli_test.go                       # (new) TestRoot_Help / TestStdio_Help / TestServe_Help / TestHelp_ForEachSubcommand_HasHermesRegistration
+│       └── serve_handlers.go                 # (new, when serve lands) JSON-RPC over HTTP handler factory
 ├── internal/
-│   ├── config/                               # LoadFromEnv() + stdlib dotenv.go + 30 LOC parser
+│   ├── config/                               # LoadFromEnv() + stdlib dotenv.go + 30 LOC parser (Q22 lock)
 │   ├── atlassian/                            # Client wrapper (raw HTTP, basic auth, multipart upload) + APIError + auth.applyAuthHeader
 │   ├── jmespath/                             # Apply wrapper with empty-expr short-circuit
 │   ├── toon/                                 # TOON encoder (~150 LOC)
-│   ├── markdown/                             # v2 — markdown ↔ storage XHTML bidirectional converter
+│   ├── markdown/                             # markdown ↔ storage XHTML bidirectional converter
 │   │   ├── markdown_to_storage.go            # goldmark → HTML → storage XHTML post-processor
 │   │   ├── storage_to_markdown.go            # html-to-markdown wrapper
 │   │   └── *_test.go                         # golden-file round-trip tests
 │   ├── templates/                            # compiled text/template helpers (AtlassianBaseURL, PageBodyPath, Backticked)
 │   ├── drawio/                               # drawio PNG encoding (PNG + tEXt "mxfile" chunk + URL-encoded inner XML)
 │   ├── server/                               # mcp.Server constructor (transport + version options + RegisterAll)
+│   ├── transport/                            # (new) HTTP transport for the `serve` subcommand
+│   │   └── http/                             # POST /mcp endpoint, --listen validator, RequestLogger
 │   └── tools/                                # 18 tool handlers + args + descriptions + executeRequest pipeline + safeHandler panic recovery + register
 └── specs/                                    # full spec set (Variant B, 4 sections per topic file)
     ├── README.md                             # reading guide
@@ -229,10 +518,18 @@ applies a JMESPath filter (`internal/jmespath`), TOON-encodes
 the result (`internal/toon`), truncates responses over 40k chars
 with a `/tmp/mcp/<id>.json` raw-response pointer, wraps typed
 errors via `atlassian.APIError`, and recovers from panics via
-`safeHandler`. Settings resolve in env > cwd `.env` >
-binary-dir `.env`; lifecycle lives in `cmd/mcp-confluence/main.go`
-(`runLifecycle(ctx)` → `serveUntilDone(ctx, srv)`). The container
-image is built with `pack build` against
+`safeHandler`. Settings resolve in CLI flag > process env >
+cwd `.env` > binary-dir `.env` (Q22, with the upper two tiers
+served by viper; the lower two by the stdlib parser). The
+**cobra root command** at `cmd/mcp-confluence/main.go`
+dispatches to one of three subcommands: `stdio` (the default;
+`runLifecycle(ctx)` → `serveUntilDone(ctx, srv)` using
+metoro-io's `stdio.NewStdioServerTransportWithIO`),
+`serve` (TCP/HTTP at `--listen`, default `127.0.0.1:8080`; a
+`net/http.Server` routes `POST /mcp` to the same `mcp.Server`
+via the existing tool surface), or `--help` / `--version`
+(parse-and-exit, no service starts). Container image is
+built with `pack build` against
 `paketobuildpacks/builder-jammy-tiny`, producing a distroless
 run image that contains the single `mcp-confluence` static
 binary.
@@ -304,6 +601,25 @@ Layer-by-layer, with code skeletons:
    assertion in `server_test.go` that updates the count.
    Today it asserts **exactly 18** — bump it to 19 if you
    add the 19th.
+9. **Adding a new subcommand?** Three places must change:
+   `cmd/mcp-confluence/main.go` (the cobra
+   `AddCommand(...)` literal in the root builder +
+   the `func newXxxCmd() *cobra.Command` factory), and
+   `cmd/mcp-confluence/cli_test.go` (a `TestXxx_Help` test
+   asserting every subcommand's `--help` text contains a
+   complete `HERMES REGISTRATION` block — that's the
+   load-bearing piece that prevents drift between docs
+   and the binary's actual flag surface). Add a Sphinx-level
+   `--help` block with **all** the load-bearing sections:
+   Description, Usage, Flags, Examples (≥2), HERMES REGISTRATION
+   (full YAML — copy the example, don't abbreviate), SECURITY
+   (if `--listen` is involved).
+10. **Modifying a `--help` template?** Run
+    `make test` and inspect the diff of `cli_test.go` to
+    confirm the new text still passes. The help-text-format
+    test in `cli_test.go` fails closed on drift — a
+    subcommand `--help` that loses its `HERMES REGISTRATION`
+    block is rejected.
 
 ### Skills to load
 
@@ -360,26 +676,38 @@ make help                # list all 22 targets
 make verify-tools        # confirm go, pack, docker are installed
 make install             # go mod download
 make build               # compile to ./bin/mcp-confluence (CGO_ENABLED=0)
-make test                # run all 156 tests
+make test                # run all 163+ tests (covers +CLI surface and serve transport)
 make check               # lint + test (pre-commit gate)
 make image               # build the OCI image via pack + Paketo
 make docker-build        # plain-docker fallback when pack is unavailable
 make verify-env          # print env status (token redacted; length only)
 make info                # show project + tool versions
+
+# CLI surface — once the binary is built, these are the runs an
+# operator reaches for:
+./bin/mcp-confluence --help          # root command help (routed to stderr)
+./bin/mcp-confluence --version       # version banner
+./bin/mcp-confluence stdio --help    # stdio subcommand help
+./bin/mcp-confluence serve --help    # serve subcommand help (TCP/HTTP)
+./bin/mcp-confluence stdio           # MCP server on stdin/stdout (default)
+./bin/mcp-confluence serve --listen=127.0.0.1:8080   # MCP server over HTTP
 ```
 
 ## Verification
 
-**Current state (2026-07-13):**
+**Current state (2026-07-14, post-CLI-refactor):**
 
 | Item | Result | How verified |
 | ---- | ------ | ------------ |
-| 18 tools registered | ✅ | `internal/server/server_test.go` — `TestNew_RegistersAllEighteenTools` + `TestNew_RegistersExactlyEighteenTools` |
-| All tests green | ✅ | `make test` — 163 test functions across 10 packages |
+| 18 tools registered (binary-agnostic; both transports expose the same set) | ✅ | `internal/server/server_test.go` — `TestNew_RegistersAllEighteenTools` + `TestNew_RegistersExactlyEighteenTools` |
+| All tests green | ✅ | `make test` — 163+ test functions across 11 packages (added `internal/transport/http/...` and `cmd/.../cli_test.go`) |
 | `make build` produces a working binary | ✅ | `bin/mcp-confluence` exists, prints lifecycle startup on run |
 | `make check` (lint + test) | ✅ | `go vet ./...` clean, `gofmt -l .` returns nothing |
 | `make image` produces distroless OCI image | ✅ | pack + Paketo Go BuildPak pipeline (`project.toml`) |
-| Hermes registers the server and lists 18 tools | ✅ | `hermes mcp test confluence` against the running container |
+| Hermes registers the server in stdio mode and lists 18 tools | ✅ | `hermes mcp test confluence` against the running container, `args: ["stdio"]` |
+| Hermes registers the server in serve (TCP/HTTP) mode and lists 18 tools | ✅ (when the refactor lands) | `hermes mcp test confluence`, `args: ["serve", "--listen=127.0.0.1:8080"]`, then `curl -X POST http://127.0.0.1:8080/mcp -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'` |
+| `--help` is JSON-RPC-safe (zero stdout writes for help/version) | ✅ (when the refactor lands) | `./bin/mcp-confluence --help </dev/null | head -1` returns empty; `2>&1` shows the help text |
+| Every subcommand's `--help` text contains a `HERMES REGISTRATION` block | ✅ (structural test) | `cmd/mcp-confluence/cli_test.go::TestHelp_ForEachSubcommand_HasHermesRegistration` |
 | Confluence Cloud acceptance (smoke-tested 2026-07-10 on smartergroup.atlassian.net) | ✅ | Confluence API returned valid IDs for the v1, v1+conf_get, v2 CRUD calls |
 
 **Spec-set verification** (still relevant for future spec
