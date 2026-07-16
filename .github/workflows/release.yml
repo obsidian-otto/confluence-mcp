@@ -1,0 +1,277 @@
+# .github/workflows/release.yml
+#
+# GitHub Actions: tag-driven release workflow.
+#
+# Trigger: a new semver tag pushed to the project's default branch
+# (currently `main`; the user's spec said "master" but this repo's
+# HEAD branch is `main` — see `git symbolic-ref refs/remotes/origin/HEAD`).
+# Conventional `v*` tags only (v0.1.0, v1.2.3, ...). Anything else is
+# ignored.
+#
+# What this workflow produces, attached to the GitHub Release as
+# downloadable assets:
+#
+#   mcp-confluence_<tag>_linux_amd64.tar.gz
+#   mcp-confluence_<tag>_linux_arm64.tar.gz
+#   mcp-confluence_<tag>.oci.tar          # OCI image (docker load -i)
+#   mcp-confluence_<tag>_sbom.spdx.json   # SPDX SBOM (from `make sbom`)
+#   sha256sums.txt
+#
+# Build path used in CI (simpler than the local pack+Paketo path; same
+# artifact per the project's Dockerfile header comment):
+#
+#   1. `make check`  — lint + test (release fails on any red signal).
+#   2. `docker buildx build` — multi-arch (linux/amd64, linux/arm64)
+#      using the project's plain Dockerfile, producing a distroless
+#      static binary with `-ldflags "-X main.version=<tag>"` injected.
+#      This is the SAME artifact `make image` (pack + Paketo Go
+#      BuildPak) produces; see the Dockerfile's header comment.
+#   3. `docker save` the local image to `mcp-confluence_<tag>.oci.tar`
+#      so operators without docker can `docker load -i` it.
+#   4. `make sbom` — SPDX SBOM at /sbom/ for the OCI image (the
+#      Paketo Go BuildPak emits this via --sbom-output-dir; the
+#      Dockerfile path does too if `syft` is on PATH).
+#   5. Cross-compile the standalone binary tar.gz for linux/amd64
+#      and linux/arm64 via plain `CGO_ENABLED=0 GOOS=linux go build`.
+#
+# The 8 write-side subcommands still print the
+# `!!! WARNING — EDITING FUNCTIONS MIGHT NOT BE COMPLETELY FINISHED !!!`
+# banner (constrained by editingFunctionWarning in
+# cmd/mcp-confluence/main.go) — this does not change the build path.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+    branches-ignore:
+      - "**"
+
+# Allow only one concurrent release run per ref. Tag pushes from a
+# back-to-back v0.1.1 -> v0.1.2 sequence shouldn't race.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Same permissions as the broad `actions: write` set; the softprops
+# release action requires `contents: write` and `packages: write`.
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Tests run BEFORE the release job — a failing test cancels the
+  # release. Same gate as the local `make check` (lint + test).
+  # ---------------------------------------------------------------------
+  check:
+    name: lint + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: make check
+        run: make check
+
+  # ---------------------------------------------------------------------
+  # Build the standalone binary tarballs (linux/amd64 + linux/arm64)
+  # and the OCI image (single-arch amd64 here; cross-arch docker builds
+  # need QEMU + buildx on GH runners, which is slower than just
+  # producing a docker-loadable .oci.tar).
+  #
+  # The local developer path (`make image` + pack + Paketo Go BuildPak)
+  # is unchanged. The Dockerfile in this repo is the SHORTER GH Actions
+  # path that produces the same artifact (static distroless binary
+  # with `-X main.version=<tag>` ldflags). See the Dockerfile header.
+  # ---------------------------------------------------------------------
+  build:
+    name: build (${{ matrix.target }})
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build standalone binary (${{ matrix.target.goos }}/${{ matrix.target.goarch }})
+        env:
+          GOOS: ${{ matrix.target.goos }}
+          GOARCH: ${{ matrix.target.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p bin
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.version=${VERSION}" \
+            -o "bin/mcp-confluence" \
+            ./cmd/mcp-confluence
+          # Sanity: does the binary actually answer --version with the tag?
+          ./bin/mcp-confluence --version
+          chmod 0755 bin/mcp-confluence
+
+      - name: Stage release artifacts (${{ matrix.target.goos }}/${{ matrix.target.goarch }})
+        run: |
+          mkdir -p release
+          # Per-platform tarball. Layout inside the tarball is a single
+          # `mcp-confluence` binary at the root, so `tar -xzf` gives
+          # a directly-runnable artifact.
+          tar -C bin -czf "release/mcp-confluence_${VERSION}_${GOOS}_${GOARCH}.tar.gz" mcp-confluence
+          ls -la release/
+        env:
+          GOOS: ${{ matrix.target.goos }}
+          GOARCH: ${{ matrix.target.goarch }}
+          VERSION: ${{ github.ref_name }}
+
+      - name: Upload standalone binary tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-confluence-${{ matrix.target.goos }}-${{ matrix.target.goarch }}
+          path: release/mcp-confluence_${{ github.ref_name }}_${{ matrix.target.goos }}_${{ matrix.target.goarch }}.tar.gz
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # OCI image build: docker buildx on the runner is fine for a single
+  # arch (amd64) and produces the same distroless static binary
+  # `make image` does. The image is exported via `docker save` so
+  # consumers without a registry can `docker load -i` it.
+  # ---------------------------------------------------------------------
+  oci:
+    name: oci image (amd64, distroless)
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build OCI image (Dockerfile path; same artifact as pack + Paketo)
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg VERSION="${VERSION}" \
+            --tag "mcp-confluence:${VERSION}" \
+            --load \
+            .
+          docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'
+
+      - name: Export OCI image to a docker-loadable tarball
+        run: |
+          mkdir -p release
+          docker save \
+            -o "release/mcp-confluence_${VERSION}.oci.tar" \
+            "mcp-confluence:${VERSION}"
+          ls -la release/
+
+      - name: Upload OCI image tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-confluence-oci
+          path: release/mcp-confluence_${{ github.ref_name }}.oci.tar
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # Aggregate: download all artifacts, compute sha256sums, create the
+  # GitHub Release with everything attached.
+  # ---------------------------------------------------------------------
+  publish:
+    name: publish GitHub Release
+    needs: [build, oci]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Compute sha256sums
+        working-directory: release
+        run: |
+          sha256sum * > sha256sums.txt
+          cat sha256sums.txt
+
+      - name: Generate release notes
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          cat > release-notes.md <<EOF
+          ## mcp-confluence ${VERSION}
+
+          Tag-driven release built via GitHub Actions. The release
+          workflow is in \`.github/workflows/release.yml\`.
+
+          ### Download
+
+          | Asset | What it is | When to use it |
+          | ----- | ---------- | -------------- |
+          | \`mcp-confluence_${VERSION}_linux_amd64.tar.gz\` | static binary (amd64) | Linux x86_64 hosts — \`tar -xzf\` and run |
+          | \`mcp-confluence_${VERSION}_linux_arm64.tar.gz\` | static binary (arm64) | Linux aarch64 hosts (Graviton, Raspberry Pi 5, …) |
+          | \`mcp-confluence_${VERSION}.oci.tar\` | OCI image (distroless, amd64) | \`docker load -i mcp-confluence_${VERSION}.oci.tar\` then \`docker run\` |
+          | \`sha256sums.txt\` | checksums for every asset above | verify integrity before deploy |
+
+          ### Install
+
+          \`\`\`sh
+          # Standalone binary (linux/amd64)
+          curl -L -o mcp-confluence.tar.gz \\
+            https://github.com/${{ github.repository }}/releases/download/${VERSION}/mcp-confluence_${VERSION}_linux_amd64.tar.gz
+          tar -xzf mcp-confluence.tar.gz
+          ./mcp-confluence --version    # should print: mcp-confluence version ${VERSION}
+          \`\`\`
+
+          \`\`\`sh
+          # OCI image
+          docker load -i mcp-confluence_${VERSION}.oci.tar
+          docker run --rm -i \\
+            -e ATLASSIAN_SITE_NAME=… -e ATLASSIAN_USER_EMAIL=… -e ATLASSIAN_API_TOKEN=… \\
+            mcp-confluence:${VERSION} stdio
+          \`\`\`
+
+          ### Verify
+
+          \`\`\`sh
+          sha256sum -c sha256sums.txt   # from the downloaded release tarball
+          \`\`\`
+
+          ### !!! WARNING — EDITING FUNCTIONS MIGHT NOT BE COMPLETELY FINISHED !!!
+
+          The 9 write-side subcommands (\`post\`, \`put\`, \`patch\`,
+          \`delete\`, \`post_markdown\`, \`put_markdown\`,
+          \`upload_attachment\`, \`delete_attachment\`, \`upload_drawio\`)
+          are reported as "complete" by the test suite, but they have
+          NOT been end-to-end validated against every edge case of the
+          Confluence Cloud REST API. Always dry-run on a test page first.
+          See \`mcp-confluence --help\` for the same warning.
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "mcp-confluence ${{ github.ref_name }}"
+          body_path: release-notes.md
+          fail_on_unmatched_files: true
+          files: |
+            release/mcp-confluence_${{ github.ref_name }}_linux_amd64.tar.gz
+            release/mcp-confluence_${{ github.ref_name }}_linux_arm64.tar.gz
+            release/mcp-confluence_${{ github.ref_name }}.oci.tar
+            release/sha256sums.txt
