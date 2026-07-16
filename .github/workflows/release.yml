@@ -195,10 +195,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mcp-confluence-${{ matrix.os }}-${{ matrix.arch }}
-          # Glob covers both extensions: .zip on windows, .tar.gz
-          # everywhere else. upload-artifact@v4 supports a single
-          # glob OR a list of files; a single glob is sufficient here.
-          path: release/mcp-confluence_${{ github.ref_name }}_${{ matrix.os }}_${{ matrix.arch }}.{tar.gz,zip}
+          # Two explicit paths (upload-artifact@v4 does NOT
+          # support shell-style brace globs like `{tar.gz,zip}` —
+          # first release run 29490723867 failed with 'No files
+          # were found' because the brace expansion was passed
+          # through literally). One of the two paths always
+          # exists: .zip on windows, .tar.gz everywhere else.
+          path: |
+            release/mcp-confluence_${{ github.ref_name }}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz
+            release/mcp-confluence_${{ github.ref_name }}_${{ matrix.os }}_${{ matrix.arch }}.zip
           if-no-files-found: error
 
   # ---------------------------------------------------------------------
