@@ -101,15 +101,26 @@ jobs:
   # with `-X main.version=<tag>` ldflags). See the Dockerfile header.
   # ---------------------------------------------------------------------
   build:
-    name: build (${{ matrix.target }})
+    name: build (${{ matrix.os }}/${{ matrix.arch }})
     needs: check
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - { goos: linux, goarch: amd64 }
-          - { goos: linux, goarch: arm64 }
+        # Generate two matrix entries:
+        #   { os: linux, arch: amd64 }   { os: linux, arch: arm64 }
+        # GH Actions expands ${{ matrix.os }} / ${{ matrix.arch }}
+        # reliably across step-level env blocks, run blocks, and
+        # uses blocks. We previously tried nested-object matrix
+        # (matrix.target.goos / matrix.target.goarch) — first
+        # release run (29486922198) showed it rendered
+        # inconsistently for arm64, so this flat form was chosen.
+        os: [linux]
+        arch: [amd64, arm64]
+    env:
+      GOOS: ${{ matrix.os }}
+      GOARCH: ${{ matrix.arch }}
+      CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@v4
 
@@ -118,11 +129,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build standalone binary (${{ matrix.target.goos }}/${{ matrix.target.goarch }})
+      - name: Build standalone binary (${{ matrix.os }}/${{ matrix.arch }})
         env:
-          GOOS: ${{ matrix.target.goos }}
-          GOARCH: ${{ matrix.target.goarch }}
-          CGO_ENABLED: "0"
           VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p bin
@@ -135,7 +143,7 @@ jobs:
           ./bin/mcp-confluence --version
           chmod 0755 bin/mcp-confluence
 
-      - name: Stage release artifacts (${{ matrix.target.goos }}/${{ matrix.target.goarch }})
+      - name: Stage release artifacts (${{ matrix.os }}/${{ matrix.arch }})
         run: |
           mkdir -p release
           # Per-platform tarball. Layout inside the tarball is a single
@@ -143,16 +151,12 @@ jobs:
           # a directly-runnable artifact.
           tar -C bin -czf "release/mcp-confluence_${VERSION}_${GOOS}_${GOARCH}.tar.gz" mcp-confluence
           ls -la release/
-        env:
-          GOOS: ${{ matrix.target.goos }}
-          GOARCH: ${{ matrix.target.goarch }}
-          VERSION: ${{ github.ref_name }}
 
       - name: Upload standalone binary tarball
         uses: actions/upload-artifact@v4
         with:
-          name: mcp-confluence-${{ matrix.target.goos }}-${{ matrix.target.goarch }}
-          path: release/mcp-confluence_${{ github.ref_name }}_${{ matrix.target.goos }}_${{ matrix.target.goarch }}.tar.gz
+          name: mcp-confluence-${{ matrix.os }}-${{ matrix.arch }}
+          path: release/mcp-confluence_${{ github.ref_name }}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
   # ---------------------------------------------------------------------
@@ -184,6 +188,8 @@ jobs:
           docker images --format '{{.Repository}}:{{.Tag}} {{.Size}}'
 
       - name: Export OCI image to a docker-loadable tarball
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p release
           docker save \
