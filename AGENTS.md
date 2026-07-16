@@ -75,6 +75,46 @@ TOON encode → 40k truncation (if oversized) → typed API error
 wrap → panics via `safeHandler`. The pipeline is the same for
 both transports — only the framing differs.
 
+## !!! WARNING — EDITING FUNCTIONS MIGHT NOT BE COMPLETELY FINISHED !!!
+
+> !!!                  USE AT YOUR OWN RISK                       !!!
+
+The 18 MCP tools split into **10 read-only** (stable) and
+**9 write-side** (under-validated). The write-side tools can
+mutate Confluence content — they create, update, delete, or
+upload. They are reported as "complete" by `make test`, but
+they have **NOT** been end-to-end validated against every edge
+case of the Confluence Cloud REST API (race conditions on
+version increments, attachment versioning, drawio macro UUIDs,
+markdown round-trip on lossy constructs, etc.).
+
+**Write-side (USE AT YOUR OWN RISK):**
+
+| Subcommand | What it does |
+| ---------- | ------------ |
+| `post`, `put`, `patch`, `delete` | Raw CRUD write side |
+| `post_markdown`, `put_markdown` | Markdown round-trip writes |
+| `upload_attachment`, `delete_attachment` | Attachment writes |
+| `upload_drawio` | Upload + embed drawio in one call |
+
+**Read-only (stable):** `get`, `list_spaces`, `list_pages`,
+`get_page_body`, `get_page_tree`, `search`, `help`,
+`get_page_markdown`, `list_attachments`.
+
+The warning is also printed by `mcp-confluence --help` (between
+ENV VARS and MCP HOST REGISTRATION) and at the top of each
+write-side subcommand's own `--help`. Before any write call:
+
+- Dry-run on a test page / space first
+- Keep a manual backup of any content you intend to overwrite
+- Review the response envelope (e.g.
+  `--jq='{id: id, version: version.number}'`) BEFORE any
+  follow-up write call
+
+This warning is enforced at the help-text layer (the const
+`editingFunctionWarning` in `cmd/mcp-confluence/main.go`), so
+drift between docs and CLI output is impossible by construction.
+
 ## CLI surface (the load-bearing piece of this refactor)
 
 The binary is a cobra app with one root command and four
@@ -231,16 +271,18 @@ RUN MODES:
   serve  Listens on --listen forever; sends a startup banner to stderr.
          Logs each HTTP request method+path to stderr.
 
-HERMES REGISTRATION:
-  In ~/.hermes/config.yaml:
-    mcp_servers:
-      confluence:
-        command: /path/to/bin/mcp-confluence
-        args: ["serve", "--listen=127.0.0.1:8080"]
-        env:
-          ATLASSIAN_SITE_NAME: smartergroup
-          ATLASSIAN_USER_EMAIL: "you@example.com"
-          ATLASSIAN_API_TOKEN:  "${ATLASSIAN_API_TOKEN}"
+MCP HOST REGISTRATION:
+  # Add this to the host's MCP server config (the mcp_servers:
+  # key is the MCP-standard registration shape; the file path
+  # varies by host — see your host's docs):
+  mcp_servers:
+    confluence:
+      command: /path/to/mcp-confluence
+      args: ["serve", "--listen=127.0.0.1:8080"]
+      env:
+        ATLASSIAN_SITE_NAME: smartergroup
+        ATLASSIAN_USER_EMAIL: "you@example.com"
+        ATLASSIAN_API_TOKEN:  "${ATLASSIAN_API_TOKEN}"
 
 SECURITY:
   - No bearer auth on /mcp — the binary holds the credential,
@@ -410,7 +452,8 @@ checklist in § Developer Guidelines):
    complete `--help` template (no skipped sections).
 3. The `cmd/mcp-confluence/cli_test.go` `TestRoot_Help` and
    per-subcommand help test, ensuring every subcommand's
-   `--help` text has a `HERMES REGISTRATION` example. This is
+   `--help` text has an MCP HOST REGISTRATION example (root /
+   stdio / serve) or an AUTOMATION example (per-tool). This is
    the load-bearing piece — the `--help` texts are the docs
    Hermes's MCP-host config relies on, and the test prevents
    drift.
@@ -720,19 +763,19 @@ Layer-by-layer, with code skeletons:
    the `func newXxxCmd() *cobra.Command` factory), and
    `cmd/mcp-confluence/cli_test.go` (a `TestXxx_Help` test
    asserting every subcommand's `--help` text contains a
-   complete `HERMES REGISTRATION` block — that's the
+   complete MCP HOST REGISTRATION block — that's the
    load-bearing piece that prevents drift between docs
    and the binary's actual flag surface). Add a Sphinx-level
    `--help` block with **all** the load-bearing sections:
-   Description, Usage, Flags, Examples (≥2), HERMES REGISTRATION
+   Description, Usage, Flags, Examples (≥2), MCP HOST REGISTRATION
    (full YAML — copy the example, don't abbreviate), SECURITY
    (if `--listen` is involved).
 10. **Modifying a `--help` template?** Run
     `make test` and inspect the diff of `cli_test.go` to
     confirm the new text still passes. The help-text-format
-    test in `cli_test.go` fails closed on drift — a
-    subcommand `--help` that loses its `HERMES REGISTRATION`
-    block is rejected.
+         test in `cli_test.go` fails closed on drift — a
+         subcommand `--help` that loses its MCP HOST REGISTRATION
+         or AUTOMATION block is rejected.
 
 ### Skills to load
 
@@ -820,7 +863,7 @@ make info                # show project + tool versions
 | Hermes registers the server in stdio mode and lists 18 tools | ✅ | `hermes mcp test confluence` against the running container, `args: ["stdio"]` |
 | Hermes registers the server in serve (TCP/HTTP) mode and lists 18 tools | ✅ (when the refactor lands) | `hermes mcp test confluence`, `args: ["serve", "--listen=127.0.0.1:8080"]`, then `curl -X POST http://127.0.0.1:8080/mcp -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'` |
 | `--help` is JSON-RPC-safe (zero stdout writes for help/version) | ✅ (when the refactor lands) | `./bin/mcp-confluence --help </dev/null | head -1` returns empty; `2>&1` shows the help text |
-| Every subcommand's `--help` text contains a `HERMES REGISTRATION` block | ✅ (structural test) | `cmd/mcp-confluence/cli_test.go::TestHelp_ForEachSubcommand_HasHermesRegistration` |
+| Every subcommand's `--help` text contains an MCP HOST REGISTRATION or AUTOMATION block | ✅ (structural test) | `cmd/mcp-confluence/cli_test.go` per-tool `TestXxx_Help` + `TestRoot_Help_NoStdout` |
 | Confluence Cloud acceptance (smoke-tested 2026-07-10 on smartergroup.atlassian.net) | ✅ | Confluence API returned valid IDs for the v1, v1+conf_get, v2 CRUD calls |
 
 **Spec-set verification** (still relevant for future spec

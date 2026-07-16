@@ -1189,8 +1189,8 @@ The **current v4 plan** (Phases 16-19) is complete when:
 - [ ] `mcp-confluence --help` exits 0 with text on **stderr** (zero stdout pollution)
 - [ ] `mcp-confluence stdio` produces byte-identical behaviour to the v0.1 binary (confirmed via `scripts/smoke-page_tree.py`)
 - [ ] `mcp-confluence serve --listen=127.0.0.1:8080` accepts a `curl -X POST` JSON-RPC request and returns a TOON response from a real `conf_get` call
-- [ ] Every subcommand's `--help` text contains a `HERMES REGISTRATION` YAML example (load-bearing for Hermes MCP-host config; tested closed in `cli_test.go`)
-- [ ] `cli_test.go::TestHelp_ForEachSubcommand_HasHermesRegistration` is green
+- [ ] Every subcommand's `--help` text contains an `MCP HOST REGISTRATION` (root/stdio/serve) or `AUTOMATION` (per-tool) YAML example (load-bearing for any MCP-host config; tested closed in `cli_test.go`)
+- [ ] `cli_test.go` per-tool `TestXxx_Help` + `TestRoot_Help_NoStdout` are green (historical: was `TestHelp_ForEachSubcommand_HasHermesRegistration`)
 - [ ] Hermes smoke (final integration): `hermes mcp test confluence` discovers 18 tools via the new `stdio` mode **and** Hermes can also reach the `serve` mode via `args: ["serve", "--listen=…"]`
 - [ ] All 22+ existing boxes above still pass (no regression — same tool surface, same tools, same handlers, same wire format on both transports)
 
@@ -1353,9 +1353,9 @@ dispatches to `runLifecycle`).
   2. `viper.SetEnvPrefix("ATLASSIAN")` + `viper.AutomaticEnv()`
   3. `viper.BindEnv(...)` for each of the 5 persistent flag names → specific env-var paths (so `--site` ↔ `ATLASSIAN_SITE_NAME`, etc.)
   4. `viper.BindPFlag(...)` for each flag, called AFTER the flag is registered (the standard viper gotcha)
-- [ ] Add the cobra-generated `--help` text to ROOT/SUBCOMMAND templates manually (cobra defaults are too terse for a Hermes-host config doc). Each help block must contain `HERMES REGISTRATION:` + a verbatim YAML example using the binary's actual flags.
+- [ ] Add the cobra-generated `--help` text to ROOT/SUBCOMMAND templates manually (cobra defaults are too terse for an MCP-host config doc). Each help block must contain `MCP HOST REGISTRATION:` + a verbatim YAML example using the binary's actual flags. (Historical: was originally `HERMES REGISTRATION:`; renamed 2026-07-16 when the CLI surface was made host-agnostic so any MCP host — not just Hermes — can detect the registration block under root `--help`.)
 - [ ] New file `cmd/mcp-confluence/cli_test.go`. First two tests:
-  - `TestRoot_Help` — captures stderr from `--help`, asserts the help text contains the strings "USAGE:", "FLAGS:", "ENV VARS:", "HERMES INTEGRATION — stdio mode:", "HERMES INTEGRATION — serve (TCP/HTTP) mode:".
+  - `TestRoot_Help` — captures stderr from `--help`, asserts the help text contains the strings "USAGE:", "FLAGS:", "ENV VARS:", "MCP HOST REGISTRATION — stdio mode:", "MCP HOST REGISTRATION — serve (TCP/HTTP) mode:" (historical: was `HERMES INTEGRATION — stdio/serve mode:`).
   - `TestVersion` — captures stderr from `--version`, asserts the version string (`v0.1.0` today; settable via `-ldflags -X main.version=…`).
 - [ ] Update `cmd/mcp-confluence/main.go` `const version = "v0.1.0"` at line 54 to be sourced from `main.version` build-linkable variable (already does this for `make image`).
 
@@ -1374,7 +1374,7 @@ options and the Option-B recommendation) and
 - [ ] `go.mod` has cobra v1.10.2 + viper v1.21.0 as direct deps
 - [ ] `make build` produces the same binary path (`bin/mcp-confluence`); CGO_ENABLED=0 preserved
 - [ ] `./bin/mcp-confluence --help </dev/null | head -1` returns **empty** (zero stdout writes)
-- [ ] `./bin/mcp-confluence --help 2>&1 | grep "HERMES INTEGRATION"` returns at least 2 lines (stdio + serve)
+- [ ] `./bin/mcp-confluence --help 2>&1 | grep "MCP HOST REGISTRATION"` returns at least 2 lines (stdio + serve)
 - [ ] `./bin/mcp-confluence --version 2>&1` prints `mcp-confluence version v0.1.0`
 - [ ] `./bin/mcp-confluence </dev/null` (no args) produces the v0.1 behaviour: startup banner on stderr, then blocks reading JSON-RPC from stdin (EOF cancels)
 - [ ] `make test` is green; `make check` (lint + test) is green
@@ -1433,7 +1433,7 @@ unchanged. Add flag-override-env tests in `cli_test.go`.
   Q22 composition path keeps `internal/config/dotenv.go`
   authoritative for cwd/binary-dir .env.
 - [ ] Print confirmation log on stderr: `mcp-confluence v0.1.0 starting (site=<site>, email=<email>)` — same one-liner the v0.1 binary already prints, so existing log-parsing isn't disrupted.
-- [ ] `cli_test.go::TestStdio_Help` — assert stdio `--help` contains the HERMES REGISTRATION block for stdio mode (full YAML example).
+- [ ] `cli_test.go::TestStdio_Help` — assert stdio `--help` contains the MCP HOST REGISTRATION block for stdio mode (full YAML example).
 - [ ] `cli_test.go::TestStdio_FlagsOverrideEnv` — spawn the binary with `args: ["stdio", "--site=forcedSite", "--email=forced@example.com"]` while `ATLASSIAN_SITE_NAME=envSite` is set in the subprocess env. Verify the spawned binary's stderr says `site=forcedSite` (flag wins). Then the inverse: same test with no `--site` flag, verify stderr says `site=envSite` (env wins).
 - [ ] `cli_test.go::TestStdio_NoEnvFailsFast` — spawn with `args: ["stdio"]`, no env, no `.env` on disk. The binary must exit with `os.Exit(1)` and stderr must contain `FATAL: ATLASSIAN_SITE_NAME is not set` (or the equivalent — be lenient on the exact phrasing, check for FATAL).
 
@@ -1445,7 +1445,7 @@ unchanged. Add flag-override-env tests in `cli_test.go`.
 - [ ] `scripts/smoke-page_tree.py` returns the same merged-envelope JSON for page-id `1831108680` (1 ancestor) and `780764253` (6 children, 25 descendants) as the v0.1 binary produced 2026-07-14
 - [ ] `cli_test.go::TestStdio_Help`, `TestStdio_FlagsOverrideEnv`, `TestStdio_NoEnvFailsFast` are green
 - [ ] `make check` is green
-- [ ] `./bin/mcp-confluence stdio` with `--help` writes stdio-specific help to stderr (with HERMES REGISTRATION block)
+- [ ] `./bin/mcp-confluence stdio` with `--help` writes stdio-specific help to stderr (with MCP HOST REGISTRATION block)
 - [ ] The Hermes-registered confluence server (after the user does the `hermes mcp test confluence` refresh) still works with `args: ["stdio"]` (today it's `args: []`; after Phase 17 the user's `~/.hermes/config.yaml` would be unchanged because `args: []` and `args: ["stdio"]` produce identical behaviour)
 
 **Kickoff prompt body** (publish to `phase-17-prompt`):
@@ -1500,7 +1500,7 @@ the MCP framing.
 - [ ] Add a graceful `SIGINT/SIGTERM` handler that mirrors `stdio`'s ctx-cancel pattern (reuse `signal.NotifyContext`).
 - [ ] Per-request stderr log: `<TIMESTAMP> serve <METHOD> <path> <status> <bytes>` (one line per request). No token logged.
 - [ ] `cmd/mcp-confluence/cli_test.go` additions:
-  - `TestServe_Help` — assert serve `--help` contains the HERMES REGISTRATION block for serve mode (full YAML).
+  - [ ] `TestServe_Help` — assert serve `--help` contains the MCP HOST REGISTRATION block for serve mode (full YAML).
   - `TestServe_Help_ShowsSecurityBlock` — assert serve `--help` includes the SECURITY section (127.0.0.1 default, no bearer auth, bind fails closed).
   - `TestServe_Help_ListsTransportDifferences` — assert serve `--help` lists the wire-format difference from stdio.
   - `TestServe_BindsAndShutsDown` — spawn `mcp-confluence serve --listen=127.0.0.1:0` (kernel picks free port); curl JSON-RPC `tools/list`; assert the response contains all 18 tool names; cancel context; assert exit 0.
@@ -1556,7 +1556,7 @@ DONE WHEN:
 - curl http://127.0.0.1:8080/mcp -X POST -d '{"jsonrpc":"2.0","method":"tools/list","id":1}' returns 18 tool names.
 - curl ... conf_get ... returns the same TOON-encoded Confluence data as the stdio smoke.
 - ./bin/mcp-confluence serve --help writes help text to STDERR
-  (not stdout). help text includes a HERMES REGISTRATION YAML
+  (not stdout). help text includes an MCP HOST REGISTRATION YAML
   block.
 - cli_test.go::TestServe_* all green.
 - Report commit SHA + curl output sample + serve --help text sample on phase-18-done.
@@ -1582,14 +1582,14 @@ Hermes MCP-host config example in AGENTS.md matches reality.
 - [ ] `docker run -d --rm --name mcp-confluence-smoke -p 127.0.0.1:18080:8080 <image> serve --listen=0.0.0.0:8080` then `curl http://127.0.0.1:18080/mcp -X POST -d '{"jsonrpc":"2.0","method":"tools/list","id":1}' -H 'Content-Type: application/json'`. Verify 18 tool names in the response.
 - [ ] Stop the smoke container.
 - [ ] Local smoke: `./bin/mcp-confluence serve --listen=127.0.0.1:8080 --site=smartergroup --email=bennie@obsidian.co.za --api-token=$ATLASSIAN_API_TOKEN &` in a tmux pane; from another shell, run `curl -X POST http://127.0.0.1:8080/mcp -d '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"conf_get_page_tree","arguments":{"page-id":"780764253","outputFormat":"json"}},"id":1}' -H 'Content-Type: application/json' | jq .` and confirm `children.results | length` returns 6 and `descendants.results | length` returns 10 (capped at limit=10). If that's the same envelope `scripts/smoke-page_tree.py` produces via stdio, the wire is identical.
-- [ ] AGENTS.md sync is **already done** at commit `aac804c`. Re-verify: open `AGENTS.md`, scroll to "## CLI surface", confirm all four subcommands listed, every subcommand's `--help` block contains a `HERMES REGISTRATION:` YAML example, the four hard rules (cobra+viper, stdout discipline, TCP fails-closed, lock-step CLI test) are documented.
+- [ ] AGENTS.md sync is **already done** at commit `aac804c`. Re-verify: open `AGENTS.md`, scroll to "## CLI surface", confirm all four subcommands listed, every subcommand's `--help` block contains an `MCP HOST REGISTRATION:` YAML example (or `AUTOMATION:` for per-tool), the four hard rules (cobra+viper, stdout discipline, TCP fails-closed, lock-step CLI test) are documented.
 - [ ] Makefile sync — confirm `make help` still renders 22 targets and `make check` is green.
 
 **Verification**
 
 - [ ] `make image` exits 0; `make image-inspect` shows the same base layers as v0.1 + the new cobra+viper + Go stdlib net/http entry-points
 - [ ] `docker run --rm <image> --help </dev/null | head -1` returns **empty** (zero stdout pollution, even from inside a distroless container)
-- [ ] `docker run --rm <image> --help 2>&1 | grep -c "HERMES INTEGRATION"` returns 2 (stdio + serve)
+- [ ] `docker run --rm <image> --help 2>&1 | grep -c "MCP HOST REGISTRATION"` returns 2 (stdio + serve)
 - [ ] The TCM/HTTP smoke (curl POST /mcp) returns the same JSON-RPC 2.0 envelope shape as the stdio smoke
 - [ ] `make check` and `make build` are green
 - [ ] README.md at the project root mentions the new `serve` subcommand (one bullet; full surface lives in AGENTS.md)
@@ -1609,8 +1609,8 @@ STEPS:
 2. docker run --rm <image> --help </dev/null | head -1 (must be
    empty — confirm stdout-protection holds in a distroless
    container)
-3. docker run --rm <image> --help 2>&1 | grep -c HERMES INTEGRATION
-   (must be 2)
+3. docker run --rm <image> --help 2>&1 | grep -c MCP HOST REGISTRATION
+   (must be 2; historical: was `HERMES INTEGRATION`)
 4. docker run -d --rm --name mcp-confluence-smoke -p 127.0.0.1:18080:8080
    <image> serve --listen=0.0.0.0:8080
 5. curl http://127.0.0.1:18080/mcp -X POST -d '{"jsonrpc":"2.0",

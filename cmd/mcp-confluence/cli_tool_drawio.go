@@ -51,7 +51,7 @@ func newUploadDrawioCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upload_drawio",
 		Short: "Upload a drawio diagram and embed it on a Confluence page in one call",
-		Long: `upload_drawio uploads a drawio diagram (XML, or PNG/SVG with
+		Long: editingFunctionWarning + `upload_drawio uploads a drawio diagram (XML, or PNG/SVG with
 embedded drawio XML) and embeds it on a Confluence page in one
 call (TOON-encoded response envelope, by default). The wire flow
 fans out up to 4 REST calls — create page (if needed), upload
@@ -117,7 +117,7 @@ EXAMPLES:
   mcp-confluence upload_drawio --pageId=163935 \
       --drawioSvgFile=/home/bennie/diagrams/seq.drawio.svg
 
-HERMES REGISTRATION:
+AUTOMATION:
   # The drawio macro emitted is the native owning-page variant
   # (ac:name="drawio" with fresh ac:local-id / ac:macro-id UUIDs
   # and the app metadata: mVer, inComment, pageId, custContentId,

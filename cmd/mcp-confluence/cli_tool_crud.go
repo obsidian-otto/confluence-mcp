@@ -29,7 +29,7 @@
 // variation is just the args struct type and the Handle*
 // function. The Long help text below is hand-authored because
 // (a) it surfaces the EXAMPLES the operator will copy-paste
-// and (b) the HERMES REGISTRATION block documents how the
+// and (b) the AUTOMATION block documents how the
 // subcommand fits into a Makefile / shell-script automation
 // flow (NOT an MCP-host registration, because the
 // per-tool subcommands are not themselves MCP servers — they
@@ -75,7 +75,7 @@ EXAMPLES:
   # Force raw JSON output (skip TOON encoding):
   mcp-confluence get --path=/wiki/api/v2/spaces?limit=1 --outputFormat=json
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Not an MCP-host registration. The 5 CRUD subcommands are
   # not exposed as MCP tools — they are the shell-script /
   # Makefile dispatch surface for a single tool call.
@@ -114,7 +114,7 @@ func newPostCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "post",
 		Short: "Create Confluence resources (HTTP POST)",
-		Long: `post issues an HTTP POST to the Confluence REST API and
+		Long: editingFunctionWarning + `post issues an HTTP POST to the Confluence REST API and
 prints the decoded response (TOON-encoded by default) on stdout.
 The request body is supplied via the --body flag as a JSON
 object string; HandlePost marshals it before sending.
@@ -138,7 +138,7 @@ EXAMPLES:
   mcp-confluence post --path=/wiki/api/v2/pages/163935/labels \
       --body='{"name":"needs-review"}'
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Shell-script automation example — gate a doc publish step:
   #
   #   publish-doc:
@@ -164,7 +164,7 @@ func newPutCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "put",
 		Short: "Replace Confluence resources (HTTP PUT — full update)",
-		Long: `put issues an HTTP PUT to the Confluence REST API and
+		Long: editingFunctionWarning + `put issues an HTTP PUT to the Confluence REST API and
 prints the decoded response (TOON-encoded by default) on stdout.
 PUT is a full-replacement operation: the request body must
 contain the complete resource (e.g. for pages, version.number
@@ -190,7 +190,7 @@ EXAMPLES:
       --body='{"id":"163935","status":"current","title":"X","spaceId":"780763211","version":{"number":2}}' \
       --jq='{id: id, version: version.number}'
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Use put from a Makefile for in-place doc rewrites:
   #
   #   rewrite-doc:
@@ -214,7 +214,7 @@ func newPatchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "patch",
 		Short: "Partially update Confluence resources (HTTP PATCH — JSON Patch array)",
-		Long: `patch issues an HTTP PATCH to the Confluence REST API and
+		Long: editingFunctionWarning + `patch issues an HTTP PATCH to the Confluence REST API and
 prints the decoded response (TOON-encoded by default) on stdout.
 The request body is a JSON ARRAY of patch operations
 (RFC 6902 style) — not a single object.
@@ -234,7 +234,7 @@ EXAMPLES:
   mcp-confluence patch --path=/wiki/api/v2/pages/163935 \
       --body='[{"op":"replace","path":"/title","value":"New title"},{"op":"replace","path":"/version/number","value":"2"}]'
 
-HERMES REGISTRATION:
+AUTOMATION:
   # PATCH from a Makefile for atomic field-level updates:
   #
   #   bump-title:
@@ -258,7 +258,7 @@ func newDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete",
 		Short: "Delete Confluence resources (HTTP DELETE — most return 204 No Content)",
-		Long: `delete issues an HTTP DELETE to the Confluence REST API.
+		Long: editingFunctionWarning + `delete issues an HTTP DELETE to the Confluence REST API.
 Most successful deletes return 204 No Content with an empty
 body, so the TOON-encoded stdout is typically empty; pass
 --outputFormat=json to surface the envelope verbatim.
@@ -282,7 +282,7 @@ EXAMPLES:
   # Force JSON output so the (empty) envelope is visible:
   mcp-confluence delete --path=/wiki/api/v2/pages/163935 --outputFormat=json
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Shell-script bulk delete (run with care — destructive):
   #
   #   cleanup-stale-pages:

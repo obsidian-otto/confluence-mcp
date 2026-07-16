@@ -24,7 +24,7 @@
 //
 // The Long help text below is hand-authored for two reasons:
 // (a) the EXAMPLES block is what the operator copy-pastes, and
-// (b) the HERMES REGISTRATION block documents how the subcommand
+// (b) the AUTOMATION block documents how the subcommand
 // fits into a Makefile / shell-script automation flow (NOT an
 // MCP-host registration, because the per-tool subcommands are
 // not themselves MCP servers — they are the dispatch surface
@@ -69,7 +69,7 @@ EXAMPLES:
   # Force raw JSON output:
   mcp-confluence list_spaces --limit=1 --outputFormat=json
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Not an MCP-host registration. The per-tool subcommands are
   # not exposed as MCP tools — they are the shell-script /
   # Makefile dispatch surface for a single tool call.
@@ -130,7 +130,7 @@ EXAMPLES:
   mcp-confluence list_pages --space-id=780763211 --limit=5 \
       --jq='results[*].{id: id, title: title}'
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Use from a Makefile for "list all pages in space X" targets:
   #
   #   list-pages:
@@ -182,7 +182,7 @@ EXAMPLES:
   # Get just the body value (jq against the {value, representation} envelope):
   mcp-confluence get_page_body --page-id=163935 --jq='value'
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Use from a Makefile for "fetch this page and write it to disk":
   #
   #   fetch-page-body:
@@ -236,7 +236,7 @@ EXAMPLES:
   mcp-confluence get_page_tree --page-id=163935 \
       --jq='{ancestors: ancestors.results[*].{id: id, title: title}}'
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Local addition — Confluence Cloud v2 has no single
   # "get page tree position" endpoint; the ancestors/children/
   # descendants split is an API design choice. The subcommand
@@ -295,7 +295,7 @@ EXAMPLES:
   mcp-confluence search --cql='type=page AND text~oncall' \
       --jq='results[*].{title: title, url: url}'
 
-HERMES REGISTRATION:
+AUTOMATION:
   # URL-encode CQL expressions with --cql=... — the handler
   # does NOT auto-encode. Use $'...' (bash) or jq -rnR
   # for the awkward operators.
@@ -345,7 +345,7 @@ EXAMPLES:
   # Force raw JSON for downstream tooling:
   mcp-confluence help --outputFormat=json | jq 'keys'
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Use from a Makefile for a "what tools does this server
   # expose?" smoke check:
   #

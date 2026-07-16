@@ -21,7 +21,7 @@
 //	mcp-confluence stdio            # explicit stdio (Phase 17 specializes)
 //	mcp-confluence serve            # explicit serve (Phase 18 specializes)
 //	mcp-confluence --help           # multi-section help, multi-section
-//	                                # HERMES REGISTRATION block on stderr
+//	                                # MCP HOST REGISTRATION block on stderr
 //	mcp-confluence --version        # prints "mcp-confluence version v0.1.0"
 //
 // CRITICAL JSON-RPC stdout invariant: cobra writes --help, --version,
@@ -92,22 +92,59 @@ import (
 // metadata that injects this via Paketo.
 const version = "v0.1.0"
 
-// HERMES REGISTRATION YAML examples, embedded in the --help text
+// editingFunctionWarning is prepended to every write-side
+// subcommand's Long: help text (post, put, patch, delete,
+// post_markdown, put_markdown, upload_attachment, delete_attachment,
+// upload_drawio). It also surfaces in the root --help (via
+// buildHelpText). The text is the load-bearing safety rail: any
+// agent running `mcp-confluence <write-cmd> --help` or just
+// `mcp-confluence --help` MUST see this warning before the
+// per-tool detail. The ASCII border is intentional — agents grep
+// the text for the word "WARNING" and the all-caps border.
+//
+// !!! DO NOT REFORMAT — the warning's grep-ability is part of the
+// contract !!!
+const editingFunctionWarning = `!!! WARNING — EDITING FUNCTIONS MIGHT NOT BE COMPLETELY FINISHED !!!
+!!!                      USE AT YOUR OWN RISK                            !!!
+
+The 8 write-side subcommands (post, put, patch, delete,
+post_markdown, put_markdown, upload_attachment, delete_attachment,
+upload_drawio) are reported as "complete" by the test suite, but
+they have NOT been end-to-end validated against every edge case of
+the Confluence Cloud REST API (race conditions on version
+increments, attachment versioning, drawio macro UUIDs, markdown
+round-trip on lossy constructs, etc.). Always:
+  - Dry-run on a test page / space first
+  - Keep a manual backup of any content you intend to overwrite
+  - Review the response envelope (e.g. --jq='{id: id, version: version.number}')
+    BEFORE any follow-up write call
+
+`
+
+// MCP HOST REGISTRATION YAML examples, embedded in the --help text
 // for the stdio and serve subcommands (per Phase 16 spec — operators
-// copy-paste these into ~/.hermes/config.yaml verbatim).
+// copy-paste these into the host's MCP server config verbatim).
+//
+// These blocks are host-agnostic. The `mcp_servers:` key is the
+// MCP-standard registration shape; consult your MCP host's docs
+// for the exact file path (Hermes uses ~/.hermes/config.yaml;
+// Claude Desktop uses ~/Library/Application Support/Claude/
+// claude_desktop_config.json; Continue uses ~/.continue/config.yaml;
+// VS Code uses .vscode/mcp.json; etc.). The command / args / env
+// payload below is identical across hosts.
 const (
-	hermesStdioRegistrationYAML = `mcp_servers:
+	hostStdioRegistrationYAML = `mcp_servers:
   confluence:
-    command: /home/YOU/Desktop/hermes/confluence-mcp/bin/mcp-confluence
+    command: /path/to/mcp-confluence
     args: ["stdio"]
     env:
       ATLASSIAN_SITE_NAME: ${ATLASSIAN_SITE_NAME}
       ATLASSIAN_USER_EMAIL: ${ATLASSIAN_USER_EMAIL}
       ATLASSIAN_API_TOKEN: ${ATLASSIAN_API_TOKEN}`
 
-	hermesServeRegistrationYAML = `mcp_servers:
+	hostServeRegistrationYAML = `mcp_servers:
   confluence:
-    command: /home/YOU/Desktop/hermes/confluence-mcp/bin/mcp-confluence
+    command: /path/to/mcp-confluence
     args: ["serve", "--listen=127.0.0.1:8080"]
     env:
       ATLASSIAN_SITE_NAME: ${ATLASSIAN_SITE_NAME}
@@ -292,7 +329,8 @@ func newStdioCmd() *cobra.Command {
 		Long: `stdio runs the mcp-confluence MCP server on the standard
 JSON-RPC transport. The server reads newline-delimited JSON-RPC
 messages from stdin and writes responses to stdout. This is the
-canonical Hermes MCP-host integration path.
+canonical MCP-host integration path (works with any host that
+speaks stdio JSON-RPC).
 
 Persistent flags (--site, --email, --api-token, --debug, --config)
 are honored via viper; flag values are re-injected into the process
@@ -351,8 +389,10 @@ EXAMPLES:
   # Kernel-pick an ephemeral port (for scripted smoke tests):
   mcp-confluence serve --listen=127.0.0.1:0
 
-HERMES REGISTRATION:
-  # ~/.hermes/config.yaml — register the HTTP-bridged MCP server
+MCP HOST REGISTRATION:
+  # Add this to the host's MCP server config (the mcp_servers:
+  # key is the MCP-standard registration shape; the file path
+  # varies by host — see your host's docs):
   mcp_servers:
     confluence:
       command: /path/to/mcp-confluence
@@ -663,9 +703,9 @@ func composeFlagsIntoEnv() {
 
 // buildHelpText returns the multi-section help text used by
 // mcp-confluence --help. The text is rendered DIRECTLY to os.Stderr
-// by the custom HelpFunc installed in newRootCmd. The HERMES
+// by the custom HelpFunc installed in newRootCmd. The MCP HOST
 // REGISTRATION block is included verbatim so operators can
-// copy-paste the YAML into ~/.hermes/config.yaml.
+// copy-paste the YAML into any MCP host's server config.
 //
 // When cmd is the root command we show both stdio and serve
 // registration examples. When cmd is a subcommand (e.g. "stdio" or
@@ -674,7 +714,7 @@ func composeFlagsIntoEnv() {
 //
 // Per-tool subcommands (the 5 CRUD subcommands added in Phase 20 —
 // see cli_tool_crud.go) ship their own USAGE / FLAGS / EXAMPLES /
-// HERMES REGISTRATION sections inside cmd.Long. For those commands
+// AUTOMATION sections inside cmd.Long. For those commands
 // we short-circuit: just print cmd.Long verbatim, with no extra
 // boilerplate. The presence of "FLAGS (auto-generated from " in
 // cmd.Long is the marker we use to detect this case.
@@ -771,26 +811,51 @@ func buildHelpText(cmd *cobra.Command) string {
 	buf.WriteString("      --debug         ↔  DEBUG\n")
 	buf.WriteString("  Precedence (locked Q22 + viper): flag > process env > .env file > default.\n\n")
 
-	// HERMES REGISTRATION section(s). Subcommands show their own
+	// !!! WARNING — EDITING FUNCTIONS UNFINISHED !!!
+	// This block is the load-bearing safety rail: any agent scanning
+	// `mcp-confluence --help` must see, BEFORE the per-tool
+	// subcommand list, that the 8 write-side tools may not behave
+	// correctly. Use at own risk; verify on a test page first.
+	buf.WriteString("!!! WARNING — EDITING FUNCTIONS MIGHT NOT BE COMPLETELY FINISHED !!!\n")
+	buf.WriteString("!!!                      USE AT YOUR OWN RISK                            !!!\n\n")
+	buf.WriteString("The 8 write-side tools below can mutate Confluence content (create,\n")
+	buf.WriteString("update, delete, upload). They are reported as \"complete\" by the test\n")
+	buf.WriteString("suite, but they have NOT been end-to-end validated against every\n")
+	buf.WriteString("edge case of the Confluence Cloud REST API (race conditions on version\n")
+	buf.WriteString("increments, attachment versioning, drawio macro UUIDs, markdown\n")
+	buf.WriteString("round-trip on lossy constructs, etc.). Always:\n")
+	buf.WriteString("  - Dry-run on a test page / space first\n")
+	buf.WriteString("  - Keep a manual backup of any content you intend to overwrite\n")
+	buf.WriteString("  - Review the diff returned by --jq='{id: id, version: version.number}'\n")
+	buf.WriteString("    BEFORE the next write call\n\n")
+	buf.WriteString("EDITING FUNCTIONS (8 — the WRITE side; treat as unfinished):\n")
+	buf.WriteString("  post, put, patch, delete,\n")
+	buf.WriteString("  post_markdown, put_markdown,\n")
+	buf.WriteString("  upload_attachment, delete_attachment, upload_drawio\n\n")
+	buf.WriteString("READ-ONLY FUNCTIONS (10 — the safe side; these are stable):\n")
+	buf.WriteString("  get, list_spaces, list_pages, get_page_body, get_page_tree,\n")
+	buf.WriteString("  search, help, get_page_markdown, list_attachments\n\n")
+
+	// MCP HOST REGISTRATION section(s). Subcommands show their own
 	// registration block; the root shows both.
 	if !cmd.HasParent() {
-		buf.WriteString("HERMES REGISTRATION — stdio mode (default):\n\n")
+		buf.WriteString("MCP HOST REGISTRATION — stdio mode (default):\n\n")
 		buf.WriteString("```yaml\n")
-		buf.WriteString(hermesStdioRegistrationYAML)
+		buf.WriteString(hostStdioRegistrationYAML)
 		buf.WriteString("\n```\n\n")
-		buf.WriteString("HERMES REGISTRATION — serve (TCP/HTTP) mode:\n\n")
+		buf.WriteString("MCP HOST REGISTRATION — serve (TCP/HTTP) mode:\n\n")
 		buf.WriteString("```yaml\n")
-		buf.WriteString(hermesServeRegistrationYAML)
+		buf.WriteString(hostServeRegistrationYAML)
 		buf.WriteString("\n```\n\n")
 	} else if cmd.Name() == "stdio" {
-		buf.WriteString("HERMES REGISTRATION — stdio mode:\n\n")
+		buf.WriteString("MCP HOST REGISTRATION — stdio mode:\n\n")
 		buf.WriteString("```yaml\n")
-		buf.WriteString(hermesStdioRegistrationYAML)
+		buf.WriteString(hostStdioRegistrationYAML)
 		buf.WriteString("\n```\n\n")
 	} else if cmd.Name() == "serve" {
-		buf.WriteString("HERMES REGISTRATION — serve (TCP/HTTP) mode:\n\n")
+		buf.WriteString("MCP HOST REGISTRATION — serve (TCP/HTTP) mode:\n\n")
 		buf.WriteString("```yaml\n")
-		buf.WriteString(hermesServeRegistrationYAML)
+		buf.WriteString(hostServeRegistrationYAML)
 		buf.WriteString("\n```\n\n")
 	}
 
@@ -842,7 +907,7 @@ func buildUsageText(cmd *cobra.Command) string {
 	}
 	return `Usage: mcp-confluence [command] [flags]
 
-Run 'mcp-confluence --help' for the full command tree and HERMES REGISTRATION examples.
+Run 'mcp-confluence --help' for the full command tree and MCP HOST REGISTRATION examples.
 `
 }
 

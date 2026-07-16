@@ -1,5 +1,15 @@
 # 03 — AI agent configuration
 
+> !!! WARNING — EDITING FUNCTIONS MIGHT NOT BE COMPLETELY FINISHED !!!
+> !!!                  USE AT YOUR OWN RISK                       !!!
+>
+> The 8 write-side tools (post, put, patch, delete, post_markdown,
+> put_markdown, upload_attachment, delete_attachment, upload_drawio)
+> can mutate Confluence content. They are reported as "complete"
+> by `make test`, but they have **NOT** been end-to-end validated
+> against every edge case of the Confluence Cloud REST API.
+> Always dry-run on a test page first.
+
 > Goal: make `mcp-confluence` available as a tool source for an
 > AI agent (Hermes Agent, Claude Desktop, Cursor, or any MCP
 > host). The contract is the same across hosts: the host

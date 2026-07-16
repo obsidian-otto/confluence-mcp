@@ -59,7 +59,7 @@ func binaryPath(t *testing.T) string {
 
 // TestRoot_Help_NoStdout locks the load-bearing JSON-RPC-stdout-
 // protection gate for `--help`. The help text MUST NOT reach
-// stdout — only stderr — so a Hermes MCP-host that reads stdout
+// stdout — only stderr — so an MCP host that reads stdout
 // for JSON-RPC frames never accidentally parses a help-text line
 // as a frame.
 //
@@ -100,7 +100,7 @@ func TestRoot_Help_NoStdout(t *testing.T) {
 		"USAGE:",
 		"FLAGS:",
 		"ENV VARS",
-		"HERMES REGISTRATION",
+		"MCP HOST REGISTRATION",
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("--help stderr missing anchor %q", want)
@@ -111,11 +111,11 @@ func TestRoot_Help_NoStdout(t *testing.T) {
 		t.Errorf("--help stderr must surface the resolution/precedence order (Q22: flag > env > .env). " +
 			"Got an unrelated section header.")
 	}
-	// The HERMES REGISTRATION block is for both stdio and serve
+	// The MCP HOST REGISTRATION block is for both stdio and serve
 	// modes — both must appear in --help's output.
-	n := strings.Count(stderr.String(), "HERMES REGISTRATION")
+	n := strings.Count(stderr.String(), "MCP HOST REGISTRATION")
 	if n != 2 {
-		t.Errorf("--help should have exactly 2 HERMES REGISTRATION blocks (stdio + serve); got %d", n)
+		t.Errorf("--help should have exactly 2 MCP HOST REGISTRATION blocks (stdio + serve); got %d", n)
 	}
 }
 
@@ -157,7 +157,7 @@ func TestVersion_OnStderr(t *testing.T) {
 
 // TestServe_Help_NoStdout is the parallel check for the `serve`
 // subcommand --help. Same discipline: 0 bytes on stdout, the
-// serve-specific HERMES REGISTRATION block on stderr.
+// serve-specific MCP HOST REGISTRATION block on stderr.
 func TestServe_Help_NoStdout(t *testing.T) {
 	t.Parallel()
 	bin := binaryPath(t)
@@ -173,8 +173,8 @@ func TestServe_Help_NoStdout(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Errorf("serve --help wrote %d bytes to stdout (must be 0)", stdout.Len())
 	}
-	if !strings.Contains(stderr.String(), "HERMES REGISTRATION") {
-		t.Errorf("serve --help stderr missing HERMES REGISTRATION block")
+	if !strings.Contains(stderr.String(), "MCP HOST REGISTRATION") {
+		t.Errorf("serve --help stderr missing MCP HOST REGISTRATION block")
 	}
 	if !strings.Contains(stderr.String(), "--listen=") {
 		t.Errorf("serve --help stderr missing --listen flag documentation")
@@ -186,7 +186,7 @@ func TestServe_Help_NoStdout(t *testing.T) {
 
 // TestStdio_Help_NoStdout is the parallel check for the `stdio`
 // subcommand --help. Same discipline: 0 bytes on stdout, the
-// stdio-specific HERMES REGISTRATION block on stderr.
+// stdio-specific MCP HOST REGISTRATION block on stderr.
 func TestStdio_Help_NoStdout(t *testing.T) {
 	t.Parallel()
 	bin := binaryPath(t)
@@ -202,11 +202,11 @@ func TestStdio_Help_NoStdout(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Errorf("stdio --help wrote %d bytes to stdout (must be 0)", stdout.Len())
 	}
-	if !strings.Contains(stderr.String(), "HERMES REGISTRATION") {
-		t.Errorf("stdio --help stderr missing HERMES REGISTRATION block")
+	if !strings.Contains(stderr.String(), "MCP HOST REGISTRATION") {
+		t.Errorf("stdio --help stderr missing MCP HOST REGISTRATION block")
 	}
 	if !strings.Contains(stderr.String(), `args: ["stdio"]`) {
-		t.Errorf("stdio --help stderr missing the stdio HERMES REGISTRATION example (must contain `args: [\"stdio\"]`)")
+		t.Errorf("stdio --help stderr missing the stdio MCP HOST REGISTRATION example (must contain `args: [\"stdio\"]`)")
 	}
 }
 
@@ -219,7 +219,7 @@ func TestStdio_Help_NoStdout(t *testing.T) {
 // be present in the environment. The four tests above lock the
 // load-bearing CLI-facing invariants: stdout pollution (zero
 // bytes), help text content, version string, and the per-
-// subcommand HERMES REGISTRATION blocks.
+// subcommand MCP HOST REGISTRATION / AUTOMATION blocks.
 
 // min is a stdlib shim for older Go (Go 1.21 added the builtin
 // min/max; this codebase pins go 1.26.4 which has them — the
@@ -570,11 +570,11 @@ func TestStdio_HelpNoFlagOverride(t *testing.T) {
 		t.Errorf("stdio --help triggered the RunE composition path (banner printed). "+
 			"Full stderr:\n%s", stderr.String())
 	}
-	// The help text MUST still contain the HERMES REGISTRATION
+	// The help text MUST still contain the MCP HOST REGISTRATION
 	// block — the composition path is independent of the help
 	// rendering path.
-	if !strings.Contains(stderr.String(), "HERMES REGISTRATION") {
-		t.Errorf("stdio --help stderr missing HERMES REGISTRATION block")
+	if !strings.Contains(stderr.String(), "MCP HOST REGISTRATION") {
+		t.Errorf("stdio --help stderr missing MCP HOST REGISTRATION block")
 	}
 }
 
@@ -779,7 +779,7 @@ func TestServe_BindsAndShutsDown(t *testing.T) {
 //
 // These tests lock the operator-facing UX at the unit level: zero
 // bytes on stdout, the multi-section help text (Description, USAGE,
-// FLAGS, EXAMPLES, HERMES REGISTRATION) on stderr. They do NOT
+// FLAGS, EXAMPLES, AUTOMATION) on stderr. They do NOT
 // exercise live Confluence calls (that is the scripts/smoke-*
 // suite) — Phase 21 will add live-invocation smoke once the
 // remaining 13 subcommands are wired and a make-gated dispatch
@@ -823,7 +823,7 @@ func TestGet_Help(t *testing.T) {
 		t.Errorf("get --help wrote %d bytes to stdout (must be 0): %q", len(stdout), stdout[:min(200, len(stdout))])
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--path",
 		"get",
@@ -881,7 +881,7 @@ func TestPost_Help(t *testing.T) {
 		t.Errorf("post --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--path",
 		"--body",
@@ -904,7 +904,7 @@ func TestPut_Help(t *testing.T) {
 		t.Errorf("put --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--path",
 		"--body",
@@ -925,7 +925,7 @@ func TestPut_Help(t *testing.T) {
 // suppression check is the positive way to catch it).
 //
 // We assert the four expected flags (path / query / jq /
-// outputFormat) and the four anchor sections (HERMES / EXAMPLES
+// outputFormat) and the four anchor sections (AUTOMATION / EXAMPLES
 // / --path / delete) to mirror the GET coverage.
 func TestDelete_Help(t *testing.T) {
 	t.Parallel()
@@ -934,7 +934,7 @@ func TestDelete_Help(t *testing.T) {
 		t.Errorf("delete --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--path",
 		"--query",
@@ -955,9 +955,8 @@ func TestDelete_Help(t *testing.T) {
 // (6 convenience, 3 markdown, 3 attachments, 1 drawio). The 13
 // tests below mirror the Phase 20 pattern: spawn the freshly-
 // built binary's `<subcommand> --help`, assert 0 bytes on stdout,
-// and assert the four anchor sections on stderr (HERMES
-// REGISTRATION / EXAMPLES / the args-struct field name / the
-// subcommand name itself).
+// and assert the four anchor sections on stderr (AUTOMATION /
+// EXAMPLES / the args-struct field name / the subcommand name itself).
 //
 // Every subcommand is asserted on at least one of its args-struct
 // field names (a flag that, if missing, would mean the
@@ -981,7 +980,7 @@ func TestListSpaces_Help(t *testing.T) {
 		t.Errorf("list_spaces --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--limit",
 		"--type",
@@ -1005,7 +1004,7 @@ func TestListPages_Help(t *testing.T) {
 		t.Errorf("list_pages --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--space-id",
 		"--sort",
@@ -1028,7 +1027,7 @@ func TestGetPageBody_Help(t *testing.T) {
 		t.Errorf("get_page_body --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--page-id",
 		"--body-format",
@@ -1050,7 +1049,7 @@ func TestGetPageTree_Help(t *testing.T) {
 		t.Errorf("get_page_tree --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--page-id",
 		"--depth",
@@ -1073,7 +1072,7 @@ func TestSearch_Help(t *testing.T) {
 		t.Errorf("search --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--cql",
 		"--limit",
@@ -1096,7 +1095,7 @@ func TestHelp_Help(t *testing.T) {
 		t.Errorf("help --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--topic",
 		"--outputFormat",
@@ -1120,7 +1119,7 @@ func TestPostMarkdown_Help(t *testing.T) {
 		t.Errorf("post_markdown --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--spaceId",
 		"--title",
@@ -1145,7 +1144,7 @@ func TestPutMarkdown_Help(t *testing.T) {
 		t.Errorf("put_markdown --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--pageId",
 		"--markdown",
@@ -1168,7 +1167,7 @@ func TestGetPageMarkdown_Help(t *testing.T) {
 		t.Errorf("get_page_markdown --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--page-id",
 		"--jq",
@@ -1191,7 +1190,7 @@ func TestUploadAttachment_Help(t *testing.T) {
 		t.Errorf("upload_attachment --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--pageId",
 		"--filePath",
@@ -1215,7 +1214,7 @@ func TestListAttachments_Help(t *testing.T) {
 		t.Errorf("list_attachments --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--pageId",
 		"--mediaType",
@@ -1238,7 +1237,7 @@ func TestDeleteAttachment_Help(t *testing.T) {
 		t.Errorf("delete_attachment --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--attachmentId",
 		"--purge",
@@ -1264,7 +1263,7 @@ func TestUploadDrawio_Help(t *testing.T) {
 		t.Errorf("upload_drawio --help wrote %d bytes to stdout (must be 0)", len(stdout))
 	}
 	for _, want := range []string{
-		"HERMES REGISTRATION",
+		"AUTOMATION",
 		"EXAMPLES",
 		"--pageId",
 		"--spaceId",
@@ -1311,7 +1310,7 @@ func TestAllEighteenToolSubcommandsExist(t *testing.T) {
 	}
 
 	// Lock the JSON-RPC-stdout invariant: --help must produce
-	// 0 bytes on stdout so a Hermes MCP-host that reads stdout
+	// 0 bytes on stdout so an MCP host that reads stdout
 	// for JSON-RPC frames never accidentally parses a help
 	// line as a frame.
 	if stdout.Len() != 0 {

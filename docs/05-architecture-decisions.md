@@ -80,9 +80,11 @@ Three reasons:
    shape; viper is the standard library for the
    flag ⇄ env ⇄ config-file precedence dance.
 2. **Help text doubles as config documentation** — every
-   subcommand's `--help` text contains a HERMES REGISTRATION
-   YAML block that's copy-pasteable into `~/.hermes/config.yaml`.
-   This is the load-bearing piece: the operator's docs and
+   subcommand's `--help` text contains an MCP HOST REGISTRATION
+   YAML block that's copy-pasteable into any MCP host's server
+   config (`mcp_servers:` for Hermes / Continue / VS Code;
+   `mcpServers:` for Claude Desktop / Cursor). This is the
+   load-bearing piece: the operator's docs and
    the agent's config are **the same file**.
 3. **Dev-iteration speed** — typing
    `./bin/mcp-confluence serve --listen=127.0.0.1:8080` is one

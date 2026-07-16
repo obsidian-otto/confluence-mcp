@@ -38,7 +38,7 @@ func newPostMarkdownCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "post_markdown",
 		Short: "Create a Confluence page from a markdown source (CommonMark + GFM)",
-		Long: `post_markdown creates a new Confluence page from a markdown
+		Long: editingFunctionWarning + `post_markdown creates a new Confluence page from a markdown
 source (TOON-encoded response, by default). The handler runs
 the markdown through internal/markdown.MarkdownToStorageXHTML
 (goldmark → storage-format XHTML) and POSTs the result to
@@ -75,7 +75,7 @@ EXAMPLES:
   mcp-confluence post_markdown --spaceId=780763211 --title='X' \
       --markdown='x' --jq='{id: id, version: version.number}'
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Not an MCP-host registration — per-tool subcommands are
   # the shell-script dispatch surface, not themselves MCP
   # tools. Use from a Makefile for a "publish doc" target:
@@ -108,7 +108,7 @@ func newPutMarkdownCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "put_markdown",
 		Short: "Update an existing Confluence page's body from a markdown source",
-		Long: `put_markdown updates the body of an existing Confluence page
+		Long: editingFunctionWarning + `put_markdown updates the body of an existing Confluence page
 from a markdown source (TOON-encoded response, by default). The
 handler runs the markdown through internal/markdown and PUTs
 the result to /wiki/api/v2/pages/{pageId}; the version.number
@@ -138,7 +138,7 @@ EXAMPLES:
   mcp-confluence put_markdown --pageId=163935 --markdown='x' \
       --jq='{id: id, version: version.number}'
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Use from a Makefile for a "rewrite doc" target:
   #
   #   rewrite-oncall-doc:
@@ -198,7 +198,7 @@ EXAMPLES:
   # Pipe to a file for offline editing:
   mcp-confluence get_page_markdown --page-id=163935 --jq=markdown > /tmp/page.md
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Use from a Makefile for a "download doc for editing" target:
   #
   #   download-page:

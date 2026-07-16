@@ -277,7 +277,7 @@ To add a transport:
 2. Register the subcommand in `cmd/mcp-confluence/main.go`
    (`func new<X>Cmd() *cobra.Command`).
 3. Add an integration test in `cmd/mcp-confluence/cli_test.go`
-   using the same `--help` → HERMES REGISTRATION block
+   using the same `--help` → MCP HOST REGISTRATION block
    discipline.
 4. Update [04-configuration-reference.md](04-configuration-reference.md)
    with the new subcommand's flag.

@@ -1,5 +1,17 @@
 # mcp-confluence — `docs/`
 
+> !!! WARNING — EDITING FUNCTIONS MIGHT NOT BE COMPLETELY FINISHED !!!
+> !!!                  USE AT YOUR OWN RISK                       !!!
+>
+> The 8 write-side subcommands (post, put, patch, delete,
+> post_markdown, put_markdown, upload_attachment,
+> delete_attachment, upload_drawio) can mutate Confluence content.
+> They are reported as "complete" by `make test`, but they have
+> **NOT** been end-to-end validated against every edge case of the
+> Confluence Cloud REST API. The same warning is printed by
+> `mcp-confluence --help` and at the top of each write-side
+> subcommand's own `--help`. Always dry-run on a test page first.
+
 > **This is the operator-facing handbook for the `mcp-confluence`
 > CLI app.** The project overview lives at the top-level
 > [README.md](../README.md); the canonical reference for the 18

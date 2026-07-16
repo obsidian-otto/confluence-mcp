@@ -75,7 +75,7 @@ Run "mcp-confluence [command] --help" for command-specific help.
 ./bin/mcp-confluence --version
 ```
 
-Each subcommand's `--help` text contains a **HERMES REGISTRATION**
+Each subcommand's `--help` text contains an **MCP HOST REGISTRATION**
 YAML block. That's the canonical example your MCP-host config
 should be based on.
 
@@ -165,7 +165,7 @@ mcp_servers:
       ATLASSIAN_API_TOKEN: ${WORKSPACE_API_TOKEN}
 ```
 
-The HERMES REGISTRATION block in each subcommand's `--help`
+The MCP HOST REGISTRATION block in each subcommand's `--help`
 text produces this YAML verbatim.
 
 ## Next

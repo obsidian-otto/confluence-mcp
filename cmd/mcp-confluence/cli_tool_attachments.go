@@ -37,7 +37,7 @@ func newUploadAttachmentCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upload_attachment",
 		Short: "Upload a binary file as an attachment to a Confluence page (v1 REST)",
-		Long: `upload_attachment uploads a single binary file from disk as
+		Long: editingFunctionWarning + `upload_attachment uploads a single binary file from disk as
 an attachment to a Confluence page (TOON-encoded response, by
 default). The wire path is the v1 REST API — Confluence Cloud has
 no v2 upload endpoint. PNG, PDF, drawio XML, JPEG, SVG, DOCX,
@@ -80,7 +80,7 @@ EXAMPLES:
   #               --filePath=$$SOURCE_DIR/$$f --comment='bulk upload'; \
   #       done
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Not an MCP-host registration — per-tool subcommands are
   # the shell-script dispatch surface, not themselves MCP
   # tools. The drawio-specific flow (upload + embed) is in
@@ -135,7 +135,7 @@ EXAMPLES:
   mcp-confluence list_attachments --pageId=163935 \
       --jq='results[*].{id: id, title: title, mediaType: mediaType, fileSize: fileSize}'
 
-HERMES REGISTRATION:
+AUTOMATION:
   # Use from a Makefile for "audit all images on page X":
   #
   #   audit-page-images:
@@ -161,7 +161,7 @@ func newDeleteAttachmentCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete_attachment",
 		Short: "Delete an attachment by id (v2 REST; default moves to trash)",
-		Long: `delete_attachment deletes an attachment by its numeric id
+		Long: editingFunctionWarning + `delete_attachment deletes an attachment by its numeric id
 (TOON-encoded, by default). The wire path is the v2 REST API
 (DELETE /wiki/api/v2/attachments/{id}). By default the
 attachment is moved to trash; pass --purge=true to permanently
@@ -195,7 +195,7 @@ EXAMPLES:
   #               --filename=$$NAME --jq='results[0].id')
   #       [ -n "$$ID" ] && mcp-confluence delete_attachment --attachmentId=$$ID
 
-HERMES REGISTRATION:
+AUTOMATION:
   # To re-upload the same filename (new version, not separate
   # attachment), use upload_attachment with the same
   # --pageId — Confluence treats re-uploading the same filename

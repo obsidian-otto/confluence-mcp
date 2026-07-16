@@ -1,12 +1,25 @@
 # mcp-confluence
 
+> !!! WARNING — EDITING FUNCTIONS MIGHT NOT BE COMPLETELY FINISHED !!!
+> !!!                  USE AT YOUR OWN RISK                       !!!
+>
+> The 8 write-side tools (post, put, patch, delete, post_markdown,
+> put_markdown, upload_attachment, delete_attachment, upload_drawio)
+> are reported as "complete" by the test suite, but they have NOT
+> been end-to-end validated against every edge case of the
+> Confluence Cloud REST API. See the
+> [warning in `mcp-confluence --help`](#editing-functions-warning)
+> for the full safety rail. Always dry-run on a test page first.
+
 A Go CLI app that ships an MCP server. A single static
 `mcp-confluence` binary exposes the **18 Confluence MCP tools**
 (ported from `@aashari/mcp-server-atlassian-confluence` v3.3.0)
 over either of two transports:
 
 - **`stdio` (default)** — newline-delimited JSON-RPC over
-  stdin/stdout. The canonical Hermes MCP-host integration.
+  stdin/stdout. The canonical MCP-host integration (works with
+  any host that speaks stdio JSON-RPC: Hermes, Claude Desktop,
+  Cursor, Continue, VS Code, etc.).
 - **`serve`** — HTTP `POST /mcp` with the JSON-RPC envelope as
   the body. LAN / dev-container / curl-friendly; bind via
   `--listen=127.0.0.1:8080`.
@@ -16,7 +29,8 @@ for MCP framing, `spf13/cobra` + `spf13/viper` for the CLI. A
 **dev-velocity rationale drives both transports**: you can
 iterate tool handlers in `internal/tools/`, rebuild, and
 immediately smoke via `curl` against `serve` — without
-restarting Hermes. Hermes registration is the final
+restarting your MCP host. MCP-host registration (e.g. the
+`mcp_servers:` block in your host's config file) is the final
 integration smoke, not the primary dev loop.
 
 ## Quick start
@@ -44,6 +58,43 @@ for the full walkthrough, [docs/02-automation-scripts.md](docs/02-automation-scr
 for shell/Python examples, and [docs/03-ai-agent-config.md](docs/03-ai-agent-config.md)
 for the Hermes / Claude Desktop / Cursor MCP-host configurations.
 
+## <a id="editing-functions-warning"></a>Editing-functions warning
+
+The 18 MCP tools split into **10 read-only** (stable) and
+**8 write-side** (under-validated). The write-side tools can
+mutate Confluence content — they create, update, delete, or
+upload. They are reported as "complete" by `make test`, but
+they have **NOT** been end-to-end validated against every edge
+case of the Confluence Cloud REST API.
+
+**Write-side tools (USE AT YOUR OWN RISK):**
+
+| Subcommand | What it does |
+| ---------- | ------------ |
+| `post` | Create any Confluence resource (HTTP POST) |
+| `put` | Full-replacement update (HTTP PUT) |
+| `patch` | RFC 6902 JSON Patch partial update |
+| `delete` | Delete any Confluence resource (HTTP DELETE) |
+| `post_markdown` | Create a page from a markdown source |
+| `put_markdown` | Update a page body from a markdown source |
+| `upload_attachment` | Upload any binary file as a page attachment |
+| `delete_attachment` | Delete an attachment by id (purge to trash or hard-delete) |
+| `upload_drawio` | Upload + embed a drawio diagram in one call |
+
+**Read-only tools (stable):** `get`, `list_spaces`, `list_pages`,
+`get_page_body`, `get_page_tree`, `search`, `help`,
+`get_page_markdown`, `list_attachments`.
+
+The same warning is printed by `mcp-confluence --help` (between
+the ENV VARS and MCP HOST REGISTRATION blocks) and at the top of
+each write-side subcommand's own `--help`. Before any write:
+
+- Dry-run on a test page / space first
+- Keep a manual backup of any content you intend to overwrite
+- Review the response envelope (e.g.
+  `--jq='{id: id, version: version.number}'`) BEFORE any
+  follow-up write call
+
 ## Tool surface
 
 | Group | Count | Examples |
@@ -54,9 +105,10 @@ for the Hermes / Claude Desktop / Cursor MCP-host configurations.
 | Attachments | 3 | `conf_upload_attachment`, `conf_list_attachments`, `conf_delete_attachment` |
 | drawio | 1 | `conf_upload_drawio` |
 
-Full surface: `mcp_confluence_<name>` after Hermes' server
-prefix. See [AGENTS.md §"## Purpose"](AGENTS.md) for the
-per-tool description matrix, or run
+Full surface: `mcp_confluence_<name>` after the server prefix
+your MCP host applies (Hermes: `mcp__confluence_conf_get`;
+Claude Desktop: just `conf_get`). See [AGENTS.md §"## Purpose"](AGENTS.md)
+for the per-tool description matrix, or run
 `mcp__confluence__conf_help` from your agent.
 
 ## Configuration resolution order (locked Q22)
