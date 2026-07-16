@@ -107,15 +107,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Generate four matrix entries (2 OSes x 2 arches):
+        # Generate five matrix entries (3 OSes x 2 arches, minus 1):
         #   linux/amd64   linux/arm64
         #   darwin/amd64  darwin/arm64   (Apple Silicon + Intel)
+        #   windows/amd64                  (added 2026-07-16; arm64 deliberately omitted — few real users yet)
         #
-        # Darwin support added 2026-07-16 per request — macOS is
-        # the most common MCP-host dev workstation after Linux.
-        # Windows can be added in a follow-up (would need .zip
-        # packaging + .exe binary rename; left out for now to
-        # keep the change focused).
+        # Darwin support added earlier in the day 2026-07-16.
+        # Windows support added 2026-07-16: same Go cross-compile
+        # pipeline, but `.exe` extension on the binary and `.zip`
+        # instead of `.tar.gz` (Windows users expect zips; tar.gz
+        # also works on Windows 10+ via the bsdtar PowerShell module,
+        # but zip is the universal default).
         #
         # GH Actions expands ${{ matrix.os }} / ${{ matrix.arch }}
         # reliably across step-level env blocks, run blocks, and
@@ -123,8 +125,11 @@ jobs:
         # (matrix.target.goos / matrix.target.goarch) — first
         # release run (29486922198) showed it rendered
         # inconsistently for arm64, so this flat form was chosen.
-        os: [linux, darwin]
+        os: [linux, darwin, windows]
         arch: [amd64, arm64]
+        exclude:
+          - os: windows
+            arch: arm64
     env:
       GOOS: ${{ matrix.os }}
       GOARCH: ${{ matrix.arch }}
@@ -146,33 +151,54 @@ jobs:
       - name: Build standalone binary (${{ matrix.os }}/${{ matrix.arch }})
         run: |
           mkdir -p bin
+          # Windows binary carries the .exe suffix; everything else
+          # is just `mcp-confluence`. Naming matters for Windows PATH
+          # resolution and for shell-launcher double-click behavior.
+          BINARY="mcp-confluence"
+          if [ "${GOOS}" = "windows" ]; then BINARY="mcp-confluence.exe"; fi
           go build \
             -trimpath \
             -ldflags "-s -w -X main.version=${VERSION}" \
-            -o "bin/mcp-confluence" \
+            -o "bin/${BINARY}" \
             ./cmd/mcp-confluence
-          # Cross-compiled binaries (arm64, darwin) can't be exec'd on
-          # the amd64 Linux runner, so we can't sanity-check with
-          # --version here. The tarball upload succeeding is
-          # sufficient proof the binary exists. (Local macOS/Linux
-          # devs can 'make build' to rebuild for their arch.)
+          # Cross-compiled binaries (arm64, darwin, windows) can't
+          # be exec'd on the amd64 Linux runner, so we can't
+          # sanity-check with --version here. The upload succeeding
+          # is sufficient proof the binary exists. (Local macOS/
+          # Linux/Windows devs can `make build` to rebuild for
+          # their arch.)
           ls -la bin/
-          file bin/mcp-confluence 2>/dev/null || true
+          file bin/${BINARY} 2>/dev/null || true
 
       - name: Stage release artifacts (${{ matrix.os }}/${{ matrix.arch }})
         run: |
           mkdir -p release
-          # Per-platform tarball. Layout inside the tarball is a single
-          # `mcp-confluence` binary at the root, so `tar -xzf` gives
-          # a directly-runnable artifact.
-          tar -C bin -czf "release/mcp-confluence_${VERSION}_${GOOS}_${GOARCH}.tar.gz" mcp-confluence
+          # Per-platform archive. Layout inside the archive is a
+          # single binary at the root, so unzipping / untarring
+          # gives a directly-runnable artifact.
+          #
+          # Windows users get a .zip with mcp-confluence.exe;
+          # everyone else gets the standard .tar.gz.
+          if [ "${GOOS}" = "windows" ]; then
+            # `zip` isn't pre-installed on ubuntu-latest runners.
+            # Install it (idempotent; uses apt-get if zip is missing).
+            if ! command -v zip >/dev/null 2>&1; then
+              sudo apt-get update -qq && sudo apt-get install -y -qq zip
+            fi
+            (cd bin && zip -9 "../release/mcp-confluence_${VERSION}_${GOOS}_${GOARCH}.zip" mcp-confluence.exe)
+          else
+            tar -C bin -czf "release/mcp-confluence_${VERSION}_${GOOS}_${GOARCH}.tar.gz" mcp-confluence
+          fi
           ls -la release/
 
-      - name: Upload standalone binary tarball
+      - name: Upload standalone binary archive
         uses: actions/upload-artifact@v4
         with:
           name: mcp-confluence-${{ matrix.os }}-${{ matrix.arch }}
-          path: release/mcp-confluence_${{ github.ref_name }}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz
+          # Glob covers both extensions: .zip on windows, .tar.gz
+          # everywhere else. upload-artifact@v4 supports a single
+          # glob OR a list of files; a single glob is sufficient here.
+          path: release/mcp-confluence_${{ github.ref_name }}_${{ matrix.os }}_${{ matrix.arch }}.{tar.gz,zip}
           if-no-files-found: error
 
   # ---------------------------------------------------------------------
@@ -261,6 +287,7 @@ jobs:
           | \`mcp-confluence_${VERSION}_linux_arm64.tar.gz\` | static binary (arm64) | Linux aarch64 hosts (Graviton, Raspberry Pi 5, …) |
           | \`mcp-confluence_${VERSION}_darwin_amd64.tar.gz\` | static binary (Intel Mac) | macOS 10.13+ x86_64 |
           | \`mcp-confluence_${VERSION}_darwin_arm64.tar.gz\` | static binary (Apple Silicon) | macOS 11+ M1/M2/M3/M4 |
+          | \`mcp-confluence_${VERSION}_windows_amd64.zip\` | static binary (.exe) | Windows 10/11/Server 2019+ x86_64 |
           | \`mcp-confluence_${VERSION}.oci.tar\` | OCI image (distroless, amd64) | \`docker load -i mcp-confluence_${VERSION}.oci.tar\` then \`docker run\` |
           | \`sha256sums.txt\` | checksums for every asset above | verify integrity before deploy |
 
@@ -311,5 +338,6 @@ jobs:
             release/mcp-confluence_${{ github.ref_name }}_linux_arm64.tar.gz
             release/mcp-confluence_${{ github.ref_name }}_darwin_amd64.tar.gz
             release/mcp-confluence_${{ github.ref_name }}_darwin_arm64.tar.gz
+            release/mcp-confluence_${{ github.ref_name }}_windows_amd64.zip
             release/mcp-confluence_${{ github.ref_name }}.oci.tar
             release/sha256sums.txt
