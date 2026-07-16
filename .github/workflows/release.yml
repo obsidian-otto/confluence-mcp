@@ -74,6 +74,18 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # The cmd/mcp-confluence package's integration tests (cli_test.go,
+      # ~28 tests) spawn the freshly-built binary via binaryPath(t),
+      # which walks up to the project root and stat's
+      # bin/mcp-confluence. Makefile `build` is NOT a dependency
+      # of `test` (and shouldn't be: pkg-level unit tests are
+      # hermetic), so we must run `make build` here before
+      # `make check` to satisfy the integration tests. The
+      # pre-built binary is also re-used by the matrix `build`
+      # and `oci` jobs' first matrix target — slight win on a
+      # cold cache.
+      - name: make build (for integration tests)
+        run: make build
       - name: make check
         run: make check
 
