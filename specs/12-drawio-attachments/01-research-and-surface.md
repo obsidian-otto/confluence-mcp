@@ -239,7 +239,7 @@ render.py).
 1. `make check` — green (vet + lint + tests).
 2. `make build` — binary produced.
 3. Restart Hermes so the new binary loads.
-4. Live test against `smartergroup.atlassian.net`:
+4. Live test against the user's own Confluence Cloud workspace:
     a. Create a sandbox page via `conf_post_markdown`.
     b. Build a minimal `.drawio` file (xml envelope with one
        cell).

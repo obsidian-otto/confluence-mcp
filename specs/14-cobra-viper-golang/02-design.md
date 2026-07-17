@@ -121,8 +121,8 @@ Three commits (per the per-step git-commit rule):
    cleanly with no stdout pollution (this is the load-bearing
    invariant check).
 
-3. **Commit 3**: live smoke against `smartergroup.atlassian.net`
-   using `scripts/smoke-page_tree.py`; document the CLI surface
+3. **Commit 3**: live smoke against the user's own Confluence
+   Cloud workspace using `scripts/smoke-page_tree.py`; document the CLI surface
    in `AGENTS.md` and `make help` (a one-line addition to the
    header comment).
 

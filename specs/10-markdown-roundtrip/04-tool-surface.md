@@ -43,7 +43,7 @@ Input args (`PostMarkdownArgs`):
 
 ```go
 type PostMarkdownArgs struct {
-    SpaceID  string `json:"spaceId"  jsonschema:"description=Numeric space id (required, e.g. '780763211')"`
+    SpaceID  string `json:"spaceId"  jsonschema:"description=Numeric space id (required, e.g. '123456789')"`
     Title    string `json:"title"    jsonschema:"description=Page title (required)"`
     Markdown string `json:"markdown" jsonschema:"description=Markdown source (required; alternative to markdownFile)"`
     // OR

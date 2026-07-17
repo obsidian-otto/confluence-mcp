@@ -119,10 +119,12 @@ type GetPageTreeArgs struct {
 
 ## Verification
 
-Live smoke + acceptance tested against smartergroup.atlassian.net
-(workspace id `780763211`, key `~712020103880d11e7e48bcbfd1820ce951e426`,
-author `bennie@obsidian.co.za`) per the user's standing instruction
-"stay within my `bennie` workspace".
+Live smoke + acceptance tested against the user's own Confluence
+Cloud workspace (site replaced with the generic `<your-site>`
+placeholder; the test transcript remains the load-bearing record
+of "the v1 wire format works end-to-end"). The exact workspace
+id, key, and author email are intentionally omitted from the
+published spec.
 
 | Test | Result |
 | --- | --- |
@@ -131,4 +133,4 @@ author `bennie@obsidian.co.za`) per the user's standing instruction
 | `make check` (lint + test) | ✅ clean |
 | `server_test.TestNew_RegistersExactlySeventeenTools` updated → renamed `Eighteen` + `expectedTools` adds `conf_get_page_tree` | ✅ |
 | New unit tests in `convenience_test.go`: `TestHandleGetPageTree_BuildsAllThreePaths`, `TestHandleGetPageTree_MissingPageID`, `TestHandleGetPageTree_SuccessEnvelope`, `TestHandleGetPageTree_Propagates404` | ✅ |
-| Live `mcp__confluence__conf_get_page_tree page-id=<bennie-space-page>` via `MCP` integration | ✅ real response from smartergroup.atlassian.net |
+| Live `mcp__confluence__conf_get_page_tree page-id=<page-id>` via `MCP` integration | ✅ real response from the user's Confluence Cloud workspace |

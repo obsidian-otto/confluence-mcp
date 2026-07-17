@@ -2,7 +2,7 @@
 
 > Originally captured during the end-to-end smoke test where Hermes
 > (this session) exercised the registered `confluence` MCP server
-> against the live Confluence Cloud API (smartergroup.atlassian.net).
+> against the user's own live Confluence Cloud workspace.
 > Updated 2026-07-10 to record the post-v1 work that landed:
 >
 > - **Issue 1 closed** by making tool descriptors explicit with
@@ -29,13 +29,13 @@
 
 | Item | Result | Where verified |
 | ---- | ------ | -------------- |
-| `.env` loading (cwd, no env vars) | ✅ works | binary output: `starting (site=smartergroup, email=bennie@obsidian.co.za)` |
+| `.env` loading (cwd, no env vars) | ✅ works | binary output: `starting (site=<your-site>, email=you@example.com)` |
 | Fail-fast on missing env | ✅ works | binary output: `FATAL: ATLASSIAN_SITE_NAME is not set. Set it to your site prefix …` |
 | Token redaction in startup log | ✅ works | `Note: API token value not logged for security` |
 | Hermes `mcp list` shows confluence + 10 tools | ✅ works | `hermes mcp list` + `hermes mcp test confluence` |
 | `conf_get` list spaces | ✅ works | 100 real spaces returned, TOON default |
 | 40k-char truncation + `/tmp/mcp/<id>.json` | ✅ works | 41 KB file saved at `/tmp/mcp/4102165-1783664265003415869.json` |
-| `conf_get` CQL search for personal space | ✅ works | located `bennie` personal space (id `780763211`) |
+| `conf_get` CQL search for personal space | ✅ works | located the user's personal space (id redacted from spec) |
 | `conf_get` direct space lookup | ✅ works | returned full v2 record |
 | `conf_get` 404 error envelope | ✅ works | upstream error propagated verbatim |
 | `conf_post` create page | ✅ works (was blocked; now fixed) | see Issue 1 below |
@@ -48,7 +48,7 @@ Calling the MCP tool:
 
     mcp__confluence__conf_post(
         path="/wiki/api/v2/pages",
-        body={"spaceId":"780763211","status":"current",
+        body={"spaceId":"<numeric-space-id>","status":"current",
               "title":"mcp-test-page","body":{"representation":"storage","value":"<p>Hello</p>"}})
 
 yielded from upstream:

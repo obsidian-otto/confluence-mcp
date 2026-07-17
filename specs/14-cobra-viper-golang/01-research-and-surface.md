@@ -572,7 +572,7 @@ operator UX demands it.
 | JSON-RPC stdout invariant | `bin/mcp-confluence --help </dev/null | head -1` returns empty (no JSON-RPC); `bin/mcp-confluence --help 2>&1` returns the help text | pending impl |
 | No new scattered shell scripts | `find . -name "*.sh" -not -path "./.git/*"` count is unchanged | pending impl |
 | Hermes integration | Restart Hermes; `hermes mcp list` still shows the server; `mcp__confluence__conf_help` still works | pending impl after user restart |
-| Live smoke against smartergroup.atlassian.net | Re-run `python3 scripts/smoke-page_tree.py` against the new binary | pending impl |
+| Live smoke against the user's own Confluence Cloud workspace | Re-run `python3 scripts/smoke-page_tree.py` against the new binary | pending impl |
 
 ### Live-verification plan (when implementing)
 
@@ -581,7 +581,7 @@ operator UX demands it.
    - `./bin/mcp-confluence </dev/null` — must continue to behave like today (startup banner on stderr, then serve JSON-RPC).
    - `./bin/mcp-confluence --help </dev/null` — exits 0, no stdout, usage on stderr.
    - `./bin/mcp-confluence --version </dev/null` — exits 0, prints `mcp-confluence version v0.1.0` on stderr.
-   - `ATLASSIAN_SITE_NAME=bogus ./bin/mcp-confluence --site=smartergroup </dev/null` — startup banner should say `site=smartergroup` (flag won over env).
+   - `ATLASSIAN_SITE_NAME=bogus ./bin/mcp-confluence --site=acme </dev/null` — startup banner should say `site=acme` (flag won over env).
 3. Smoke against the MCP wire:
    `python3 scripts/smoke_page_tree.py` — must pass unchanged.
 4. Hermes integration: user restarts Hermes; `hermes mcp test confluence` should still register the server (now with `--help`/`--version` added but no other behavior change).

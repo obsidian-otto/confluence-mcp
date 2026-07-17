@@ -256,7 +256,7 @@ $ grep -nE "X-Atlassian-Token" .../confluence/api_client_impl.go
 2. `make build` — binary produced.
 3. Restart Hermes so the new binary loads.
 4. `mcp__confluence__conf_help topic=all` reports "All 16 tools".
-5. Live test against `smartergroup.atlassian.net`:
+5. Live test against the user's own Confluence Cloud workspace:
     a. Create a sandbox page via `conf_post_markdown`.
     b. Call `conf_upload_attachment` with a small test PNG.
     c. Call `conf_list_attachments` to verify the upload.

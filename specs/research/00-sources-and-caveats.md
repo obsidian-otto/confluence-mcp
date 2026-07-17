@@ -275,7 +275,7 @@ Metrics for the spec set as a whole.
 ### How to reproduce
 
 ```sh
-cd /home/bennie/Desktop/hermes/confluence-mcp
+cd /path/to/confluence-mcp
 
 # Spec file count and size
 echo "Files:"
